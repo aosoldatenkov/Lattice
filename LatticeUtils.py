@@ -7,7 +7,22 @@ import math
 import cdd
 import cdd.gmp
 from fractions import Fraction
+from itertools import product
 
+
+def batch_int_seq(n, size):
+    d = int(math.pow(size, 1 / n))
+    if d < 2:
+        raise ValueError("Size too small for the given n")
+    size = d ** n
+    coords = [np.array([0] * i + [1] + [0] * (n - i - 1)) for i in range(n)]
+    batch0 = np.ndarray((size, n), dtype=int)
+    for i, seq in enumerate(product(range(d), repeat=n)):
+        batch0[i,:] = sum(coords[j] * seq[j] for j in range(n))
+    for v in int_seq(n, signs=[1] * n):
+        base = np.array(v, dtype=int) * d
+        for i in range(size):
+            yield base + batch0[i,:]
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
     """
