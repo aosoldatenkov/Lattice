@@ -2,42 +2,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Iterator, Any
-
-def int_seq(dim: int, signs: Optional[List[int]] = None, nonzero: bool = False, length: int = -1) -> Iterator[List[int]]:
-    """Lists all integer sequences of length dim, with given restrictions on signs"""
-    if signs is None:
-        signs = [0] * dim
-    
-    v = [0] * dim
-    if nonzero:
-        head = 0
-        width = 1
-        v[0] = 1
-    else:
-        head = dim - 1
-        width = 0
-        
-    n = length
-    while n != 0:
-        out = [(v[i] >> 1) - (v[i] & 1) * (v[i] | 1) for i in range(dim)]
-        
-        # Verify sign constraints
-        if all(out[j] * signs[j] >= 0 for j in range(dim)):
-            yield out
-            n -= 1
-            
-        if head == dim - 1:
-            width += 1
-            v[head] = 0
-            v[0] = width
-            head = 0
-        else:
-            v[head + 1] += 1
-            w = v[head]
-            v[head] = 0
-            v[0] = w - 1 if w > 0 else 0
-            head = 0 if v[0] > 0 else head + 1
-
+from IntVectors import int_seq
 
 @dataclass
 class BinBasis:
