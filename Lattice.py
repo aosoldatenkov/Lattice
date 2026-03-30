@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math
 import numpy as np
+from hsnf import smith_normal_form
 import flint as fl
 from typing import List, Tuple
 
@@ -18,12 +19,25 @@ class Lattice:
             
         self._compute_exponent()
         self._init_basis()
+        self._snf_L_inv = None
+        self._snf_D = None
+        self._snf_R = None
         
     def _compute_exponent(self) -> None:
         B = self.A.snf()
-        self.dgroup = [B[i, i] for i in range(self.rank)]
+        self.dgroup = [int(B[i, i]) for i in range(self.rank)]
         self.disc = math.prod(self.dgroup)
         self.exp = max(self.dgroup)
+
+    def _compute_snf(self) -> None:
+        if self._snf_L_inv is not None:
+            return
+        M = np.array(self.A.tolist(), dtype=object)
+        D, L, R = smith_normal_form(M)
+        L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
+        self._snf_L_inv = L_inv
+        self._snf_D = fl.fmpz_mat(D.tolist())
+        self._snf_R = fl.fmpz_mat(R.tolist())
 
     def _init_basis(self) -> None:
         # Convert to float64 safely for np.linalg
@@ -108,7 +122,7 @@ class Lattice:
         B, _denom = T.inv().numer_denom() # T in GL(n, Z), so denom is 1
         # Finds number of rows in H that are not entirely zero
         H_list = H.tolist()
-        H_len = min(len(H_list), self.rank)
+        H_len = min(len(gens), self.rank)
         num_independent = sum(1 for i in range(H_len) if any(H_list[i][j] != 0 for j in range(H_len)))
         B_transposed = B.transpose().tolist()
         return [B_transposed[i] for i in range(num_independent)]
@@ -125,7 +139,27 @@ class Lattice:
         return self.saturate(K.transpose().tolist()[:n])
     
     def dual_vec(self, u: List[int]) -> Tuple[List[int], int]:
-        """Given a vector u, finds its divisibility d in the dual lattice and a vector v, such that (u, v) = d. Returns the pair (v, d)."""
+        """Given a vector u, finds its divisibility d in the dual lattice and a vector v, such that (u, v) = d.
+        Returns the pair (v, d)."""
         B = self.A * fl.fmpz_mat(self.rank, 1, u)
         H, T = B.hnf(transform=True)
         return T.tolist()[0], H[0, 0]
+    
+    def make_primitive(self) -> Lattice:
+        d = math.gcd(*self.dgroup)
+        return Lattice(self.rank, [[a // d for a in row] for row in self.A.tolist()]) if d > 1 else self
+    
+    def clear_squares(self) -> Lattice:
+        """Returns the square-free overlattice of the (rescaled to be primitive) lattice"""
+        def max_square(n: int) -> int:
+            s = 1
+            for k in range(1, int(math.sqrt(n)) + 1):
+                if n % (k * k) == 0:
+                    s = k
+            return s
+        self._compute_snf()
+        D0 = fl.fmpz_mat(self._snf_D)
+        for i in range(self.rank):
+            D0[i, i] = max_square(self._snf_D[i, i])
+        new_A, _ = (D0.inv() * self._snf_R.transpose() * self.A * self._snf_R * D0.inv()).numer_denom()
+        return Lattice(self.rank, new_A.tolist())
