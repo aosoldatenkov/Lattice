@@ -64,13 +64,17 @@ def int_seq_r(dim: int, max_rr: int = 10 ** 100) -> Iterator[tuple[int]]:
         yield v
 
 
-class BlockGenerator:
+class BatchGenerator:
 
-    def __init__(self, dim: int, d: int):
+    def __init__(self, dim: int, d: int = 3, symmetric: bool = True, max_size: Optional[int] = None):
         self.dim = dim
-        self.d = d#max(1, int(math.pow(bsize, 1 / dim)))
+        self.d = d
         self.bsize = self.d ** dim
-        self.block = list(product(range(self.d), repeat=dim))
+        if max_size and self.bsize > max_size:
+            self.d = max(1, int(math.pow(max_size, 1 / dim)))
+            self.bsize = self.d ** dim
+        interval = range(-((self.d - 1) // 2), 1 + self.d // 2) if symmetric else range(self.d)
+        self.block = list(product(interval, repeat=dim))
 
     def blocks(self) -> Iterator[List[List[int]]]:
         for v in int_seq_r(self.dim):
