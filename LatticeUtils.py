@@ -3,11 +3,35 @@ from Lattice import Lattice
 from BinLattice import BinLattice, int_seq
 from typing import List, Iterator
 import numpy as np
+from hsnf import smith_normal_form
 import math
 import cdd
 import cdd.gmp
 from fractions import Fraction
-from itertools import product
+
+
+def fibre_product(A1: list[list[int]], A2: list[list[int]]) -> list[list[int]]:
+    n1 = len(A1)
+    n2 = len(A2)
+    if n1 == 0 or n2 == 0:
+        return []
+    M = fl.fmpz_mat(A1 + A2).transpose()
+    K, r = M.nullspace()
+    _H, T = K.hnf(transform=True)
+    B, _denom = T.inv().numer_denom()
+    C = B.transpose().tolist()[:r]
+    return [v[:n1] for v in C], [v[n1 : n1 + n2] for v in C]
+
+
+def image(A: list[list[int]]) -> list[list[int]]:
+    """Given a matrix A, returns a basis for the Z-span of its rows."""
+    M = np.array(A, dtype=object).transpose()
+    D, L, _R = smith_normal_form(M)
+    L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
+    n = min(M.shape)
+    r = sum(1 for i in range(n) if D[i, i] != 0)
+    T_list = (L_inv * fl.fmpz_mat(D.tolist())).transpose().tolist()
+    return [T_list[i] for i in range(r)]
 
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
@@ -158,17 +182,53 @@ def fincke_pohst_search(M: np.ndarray, bound: float) -> Iterator[List[int]]:
     return results
 
 def A_lat(n):
-    A = [[0] * n for _ in range(n)]
-    for i in range(n):
-        A[i][i] = 2
-        if i > 0:
-            A[i][i - 1] = -1
-        if i < n - 1:
-            A[i][i + 1] = -1
+    I = Lattice(1, [[1]])
+    R = I * (n + 1)
+    E = [[int(i == j) - int(i == j + 1) for i in range(n + 1)] for j in range(n)]
+    A = R.batch_prod(E, E)
+    return Lattice(n, A)
+
+def B_lat(n):
+    I = Lattice(1, [[1]])
+    R = I * n
+    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[int(i == n - 1) for i in range(n)]]
+    A = R.batch_prod(E, E)
+    return Lattice(n, A)
+
+def C_lat(n):
+    I = Lattice(1, [[1]])
+    R = I * n
+    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[2 * int(i == n - 1) for i in range(n)]]
+    A = R.batch_prod(E, E)
+    return Lattice(n, A)
+
+def D_lat(n):
+    I = Lattice(1, [[1]])
+    R = I * n
+    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[int(i == n - 1 or i == n - 2) for i in range(n)]]
+    A = R.batch_prod(E, E)
     return Lattice(n, A)
 
 def E_lat(n):
-    if n not in [6, 7, 8]:
+    if n == 4:
+        return A_lat(4)
+    elif n == 5:
+        return D_lat(5)
+    elif n not in [6, 7, 8]:
+        raise ValueError("n must be 6, 7, or 8")
+    A = A_lat(n - 1).A.tolist()
+    A = [[2, 0, 0, -1] + [0] * (n - 4)] + [[-int(i == 2)] + A[i] for i in range(n - 1)]
+    return Lattice(n, A)
+
+def E_lat_test(n):
+    if n == 4:
+        return A_lat(4)
+    elif n == 5:
+        return D_lat(5)
+    elif n not in [6, 7, 8]:
         raise ValueError("n must be 6, 7, or 8")
     n_roots = {6: 72, 7: 126, 8: 240}
     I = Lattice(1, [[1]])
@@ -181,11 +241,9 @@ def E_lat(n):
     roots = []
     for v in int_seq(n, nonzero=True):
         if M.is_root(v):
-            print(f'Found {len(roots)} of {n_roots[n]} roots\r', end='')
             roots.append(v)
         if len(roots) == n_roots[n]:
             break
-    print('Choosing simple roots...')
     for v in int_seq(n, nonzero=True):
         if all(M.product([n + v[i] for i in range(n)], r) != 0 for r in roots):
             dir = [n + v[i] for i in range(n)]
