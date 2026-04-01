@@ -32,12 +32,17 @@ for k in sorted(ll.keys()):
 print()
 print(sum(len(ll[d]) for d in ll.keys()), 'isomorphism classes of lattices listed')
 
-for a, b, h in int_seq(3, signs = [0, 0, 1], length = 1000000):
-    if abs(a * b - h * h) > max_d:
-        continue
-    lat = BinLattice(a, b, h)
-    if lat.signature not in [(2, 0), (1, 1)]:
-        continue
-    if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
-        print('Lattice missing:')
-        print(lat.info())
+# for d in sorted(ll.keys(), reverse=True):
+#     for l in ll[d]:
+#         if len(l.zero) == 0 and not l.list_roots():
+#             print(f"Found a lattice with no roots: a={l.can.a}, b={l.can.b}, h={l.can.h}, disc={l.disc}")
+
+# for a, b, h in int_seq(3, signs = [0, 0, 1], length = 1000000):
+#     if abs(a * b - h * h) > max_d:
+#         continue
+#     lat = BinLattice(a, b, h)
+#     if lat.signature not in [(2, 0), (1, 1)]:
+#         continue
+#     if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
+#         print('Lattice missing:')
+#         print(lat.info())
