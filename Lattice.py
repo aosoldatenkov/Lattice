@@ -87,7 +87,8 @@ class Lattice:
             return 'Zero lattice'
         parity = 'Even' if all(self.A[i, i] % 2 == 0 for i in range(self.rank)) else 'Odd'
         lines = [
-            f"{parity} lattice of signature {self.signature}, discriminant {self.disc} and exponent {self.exp}"
+            f"{parity} lattice of signature {self.signature}, discriminant {self.disc} and exponent {self.exp}",
+            f"Discriminant group: {self.dgroup}"
         ]
         return '\n'.join(lines) + '\n'
     
@@ -188,7 +189,7 @@ class Lattice:
         return Lattice(self.rank, [[a // d for a in row] for row in self.A.tolist()]) if d > 1 else self
     
     def clear_squares(self) -> Lattice:
-        """Returns the square-free overlattice of the (rescaled to be primitive) lattice"""
+        """Returns the square-free overlattice of the lattice"""
         def max_square(n: int) -> int:
             s = 1
             for k in range(1, int(math.sqrt(n)) + 1):
@@ -201,3 +202,10 @@ class Lattice:
             D0[i, i] = max_square(self._snf_D[i, i])
         new_A, _ = (D0.inv() * self._snf_R.transpose() * self.A * self._snf_R * D0.inv()).numer_denom()
         return Lattice(self.rank, new_A.tolist())
+    
+    def make_ssf(self) -> Lattice:
+        """Returns the associated strongly square-free lattice"""
+        factor = 1
+        for i in range(self.rank // 2 + 1):
+            factor *= (self.dgroup[i] // factor)
+        return self(factor).clear_squares()
