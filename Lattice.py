@@ -26,7 +26,7 @@ class Lattice:
     def _compute_exponent(self) -> None:
         B = self.A.snf()
         self.dgroup = [int(B[i, i]) for i in range(self.rank)]
-        self.disc = math.prod(self.dgroup)
+        self.disc = self.A.det()
         self.exp = max(self.dgroup)
 
     def _compute_snf(self) -> None:
@@ -91,12 +91,50 @@ class Lattice:
         ]
         return '\n'.join(lines) + '\n'
     
+    def _lll_indefinite(self) -> None:
+        """
+        Applies LLL reduction to an indefinite lattice
+        using a positive-definite majorant metric.
+        """
+        # 1. Convert to float for spectral decomposition
+        A_float = np.array(self.A.tolist(), dtype=np.float64)
+        
+        # 2. Build the positive-definite majorant (M)
+        eival, eivec = np.linalg.eigh(A_float)
+        M_float = eivec @ np.diag(np.abs(eival)) @ eivec.T
+        
+        # 3. Scale up to preserve precision in integer arithmetic
+        # We scale M by 10^12, meaning the Cholesky basis scales by 10^6
+        scale = 1e12 
+        eps = np.eye(self.rank) * 1e-10 # Ensure numerical strict positive-definiteness
+        
+        # 4. Get the "basis" of the Majorant via Cholesky decomposition
+        # np.linalg.cholesky returns a lower triangular matrix where rows are basis vectors
+        L_float = np.linalg.cholesky(M_float * scale + eps)
+        
+        # 5. Round to integer basis matrix and convert to FLINT
+        L_int_list = np.round(L_float).astype(int).tolist()
+        L_fmpz = fl.fmpz_mat(L_int_list)
+        
+        # 6. Apply LLL to this basis to extract the unimodular transformation U
+        # FLINT's transform=True returns a tuple: (reduced_matrix, transformation_matrix)
+        _, U = L_fmpz.lll(transform=True)
+        
+        # 7. Apply the transformation to the ORIGINAL exact indefinite Gram matrix
+        # The new Gram matrix is U * A * U^T
+        B = U * self.A * U.transpose()
+        return B.tolist()
+        
     def lll(self) -> List[List[int]]:
         """Returns the LLL-reduced Gram matrix for positive-definite lattices."""
-        if self.signature != (self.rank, 0):
-            return self.A.tolist()
-        return self.A.lll(rep='gram').tolist()
-
+        match self.signature:
+            case (self.rank, 0):
+                return self.A.lll(rep='gram').tolist()
+            case (0, self.rank):
+                return (-self.A).lll(rep='gram').tolist()
+            case _:
+                return self._lll_indefinite()
+        
     def product(self, u: List[int], v: List[int]) -> int:
         return (fl.fmpz_mat(1, self.rank, u) * self.A * fl.fmpz_mat(self.rank, 1, v))[0, 0]
     
