@@ -332,7 +332,7 @@ class BinLattice:
             return bas.copy() if bas.a > 0 else bas.swap()
             
         b0 = bas.negate() if bas.a < 0 else bas.copy()
-        bn = bas.flip() if b0.h > 0 else b0.copy()
+        bn = b0.flip() if b0.h > 0 else b0
         
         while bn.a * bn.b > 0:
             c = bn.a + bn.b + 2 * bn.h
