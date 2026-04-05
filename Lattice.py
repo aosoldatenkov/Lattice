@@ -1,9 +1,12 @@
 from __future__ import annotations
 import math
 import numpy as np
+import sympy as sp
 from hsnf import smith_normal_form
 import flint as fl
 from typing import List, Tuple
+
+
 
 class Lattice:
     def __init__(self, rank: int, prod: List[List[int]]):
@@ -33,6 +36,7 @@ class Lattice:
         if self._snf_L_inv is not None:
             return
         M = np.array(self.A.tolist(), dtype=object)
+        # L * M * R = D
         D, L, R = smith_normal_form(M)
         L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
         self._snf_L_inv = L_inv
@@ -40,20 +44,32 @@ class Lattice:
         self._snf_R = fl.fmpz_mat(R.tolist())
 
     def _init_basis(self) -> None:
-        # Convert to float64 safely for np.linalg
-        A_float = np.array(self.A.tolist(), dtype=np.float64)
-        eival, eivec = np.linalg.eigh(A_float)
+        """Uses sympy to compute the signature of the lattice via a symbolic computation
+        to avoid numerical instability issues with np.linalg.eigh."""
+        A_sp = sp.Matrix(self.A.tolist())
+        eival = A_sp.eigenvals()
+        # Sympy does not always correctly handle inequalities with symbolic expressions,
+        # so we use a numerical approximation as a fallback in those cases.
+        try:
+            n_pos = sum(eival[a] for a in eival if a.as_real_imag()[0] > 0)
+        except:
+            n_pos = sum(eival[a] for a in eival if sp.N(a, 50).as_real_imag()[0] > 0)
+        self.signature = (n_pos, self.rank - n_pos)
+        self.parity = any(self.A[i, i] % 2 for i in range(self.rank))
+        # # Convert to float64 safely for np.linalg
+        # A_float = np.array(self.A.tolist(), dtype=np.float64)
+        # eival, eivec = np.linalg.eigh(A_float)
         
-        # Sort descending to group positive eigenvalues first
-        idx = np.argsort(eival)[::-1]
-        eival = eival[idx]
-        eivec = eivec[:, idx]
+        # # Sort descending to group positive eigenvalues first
+        # idx = np.argsort(eival)[::-1]
+        # eival = eival[idx]
+        # eivec = eivec[:, idx]
         
-        pos_count = np.sum(eival > 0)
-        self.signature = (int(pos_count), self.rank - int(pos_count))
+        # pos_count = np.sum(eival > 0)
+        # self.signature = (int(pos_count), self.rank - int(pos_count))
         
-        eival_abs = np.sqrt(np.abs(eival))
-        self.norm_basis = eivec / eival_abs
+        # eival_abs = np.sqrt(np.abs(eival))
+        # self.norm_basis = eivec / eival_abs
 
     def __add__(self, other: Lattice) -> Lattice:
         """Computes the orthogonal direct sum of two lattices."""
@@ -85,17 +101,19 @@ class Lattice:
     def info(self) -> str:
         if self.signature == (0, 0):
             return 'Zero lattice'
-        parity = 'Even' if all(self.A[i, i] % 2 == 0 for i in range(self.rank)) else 'Odd'
+        parity = 'Odd' if self.parity else 'Even'
         lines = [
             f"{parity} lattice of signature {self.signature}, discriminant {self.disc} and exponent {self.exp}",
             f"Discriminant group: {self.dgroup}"
         ]
-        return '\n'.join(lines) + '\n'
+        return '\n'.join(lines)
     
-    def _lll_indefinite(self) -> None:
+    def _lll_indefinite_np(self) -> None:
         """
         Applies LLL reduction to an indefinite lattice
         using a positive-definite majorant metric.
+        Uses numpy for the spectral decomposition and Cholesky decomposition,
+        and FLINT for the integer lattice operations.
         """
         # 1. Convert to float for spectral decomposition
         A_float = np.array(self.A.tolist(), dtype=np.float64)
@@ -106,7 +124,7 @@ class Lattice:
         
         # 3. Scale up to preserve precision in integer arithmetic
         # We scale M by 10^12, meaning the Cholesky basis scales by 10^6
-        scale = 1e12 
+        scale = 1e12
         eps = np.eye(self.rank) * 1e-10 # Ensure numerical strict positive-definiteness
         
         # 4. Get the "basis" of the Majorant via Cholesky decomposition
@@ -125,16 +143,38 @@ class Lattice:
         # The new Gram matrix is U * A * U^T
         B = U * self.A * U.transpose()
         return B.tolist()
+
+    def _lll_indefinite_sp(self) -> None:
+        """
+        Applies LLL reduction to an indefinite lattice
+        using a positive-definite majorant metric.
+        Uses sympy to reduce numerical instability issues with np.linalg.eigh,
+        and sympy's cholesky for the majorant basis. Finally, uses sympy's LLL
+        to get the transformation matrix. This is much slower than the numpy version,
+        but more stable for large discriminants.
+        """
+        A_sp = sp.Matrix(self.A.tolist())
+        P, D = A_sp.diagonalize()
+        D = sp.N(D, 50).as_real_imag()[0]
+        P = sp.N(P, 50).as_real_imag()[0]
+        M = P * D.applyfunc(lambda x: abs(x)) * P.inv()
+        M = M * 1e15
+        M = M.applyfunc(lambda x: int(x.round()))
+        B = (M.cholesky(hermitian=True)).evalf()
+        B = B.applyfunc(lambda x: int(x.round()))
+        _, U = B.lll_transform()
+        return [[int(x) for x in row] for row in (U * A_sp * U.transpose()).tolist()]
         
     def lll(self) -> List[List[int]]:
-        """Returns the LLL-reduced Gram matrix for positive-definite lattices."""
+        """Returns the LLL-reduced Gram matrix. In the case of an indefinite lattice,
+        uses a positive-definite majorant."""
         match self.signature:
             case (self.rank, 0):
                 return self.A.lll(rep='gram').tolist()
             case (0, self.rank):
                 return (-self.A).lll(rep='gram').tolist()
             case _:
-                return self._lll_indefinite()
+                return self._lll_indefinite_np()
         
     def product(self, u: List[int], v: List[int]) -> int:
         return (fl.fmpz_mat(1, self.rank, u) * self.A * fl.fmpz_mat(self.rank, 1, v))[0, 0]
@@ -154,22 +194,55 @@ class Lattice:
         v = umat * self.A
         d = 2 * math.gcd(*v.tolist()[0])
         return d % norm_sq == 0
-        
-    def saturate(self, gens: List[List[int]]) -> List[List[int]]:
-        """Given a set of generators for a sublattice, returns a basis for the saturated sublattice spanned by the generators."""
+
+    @staticmethod
+    def saturate(gens: List[List[int]]) -> List[List[int]]:
+        """Given a set of generators for a sublattice, returns a basis for the saturated sublattice
+        spanned by the generators."""
+        rank = len(gens[0])
         H, T = fl.fmpz_mat(gens).transpose().hnf(transform=True)
         B, _denom = T.inv().numer_denom() # T in GL(n, Z), so denom is 1
         # Finds number of rows in H that are not entirely zero
-        H_list = H.tolist()
-        H_len = min(len(gens), self.rank)
-        num_independent = sum(1 for i in range(H_len) if any(H_list[i][j] != 0 for j in range(H_len)))
+        H_len = min(len(gens), rank)
+        num_independent = sum(1 for i in range(H_len) if any(H[i, j] != 0 for j in range(H_len)))
         B_transposed = B.transpose().tolist()
         return [B_transposed[i] for i in range(num_independent)]
     
-    def index(self, gens: List[List[int]]) -> int:
-        """Given a set of generators for a sublattice, returns the index of the sublattice spanned by the generators."""
+    @staticmethod
+    def index(gens: List[List[int]]) -> int:
+        """Given a set of generators for a sublattice, returns the index of the sublattice
+        spanned by the generators."""
         S = fl.fmpz_mat(gens).snf()
         return math.prod([S[i, i] for i in range(len(gens)) if S[i, i] != 0])
+    
+    @staticmethod
+    def fibre_product(A1: list[list[int]], A2: list[list[int]]) -> list[list[int]]:
+        n1 = len(A1)
+        n2 = len(A2)
+        if n1 == 0 or n2 == 0:
+            return []
+        M = fl.fmpz_mat(A1 + A2).transpose()
+        K, r = M.nullspace()
+        _H, T = K.hnf(transform=True)
+        B, _denom = T.inv().numer_denom()
+        C = B.transpose().tolist()[:r]
+        return [v[:n1] for v in C], [v[n1 : n1 + n2] for v in C]
+
+    @staticmethod
+    def image(A: list[list[int]]) -> list[list[int]]:
+        """Given a matrix A, returns a basis for the Z-span of its rows."""
+        L = fl.fmpz_mat(A)
+        B = L * L.transpose()
+        H, T = B.hnf(transform=True)
+        rank = sum(1 for i in range(len(A)) if any(H[i, j] != 0 for j in range(len(A))))
+        return (T * L).tolist()[:rank]
+        # M = np.array(A, dtype=object).transpose()
+        # D, L, _R = smith_normal_form(M)
+        # L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
+        # n = min(M.shape)
+        # r = sum(1 for i in range(n) if D[i, i] != 0)
+        # T_list = (L_inv * fl.fmpz_mat(D.tolist())).transpose().tolist()
+        # return [T_list[i] for i in range(r)]
     
     def complement(self, gens: List[List[int]]) -> List[List[int]]:
         """Given a set of generators for a sublattice, returns a basis for its orthogonal complement."""
@@ -177,6 +250,23 @@ class Lattice:
         K, n = G.nullspace()
         return self.saturate(K.transpose().tolist()[:n])
     
+    def subquotient(self, gens: List[List[int]]) -> List[List[int]]:
+        """Given a set of generators for a sublattice L, returns a basis for the lattice
+        that represents the quotient of L by the kernel of the quadratic form induced on L."""
+        L = fl.fmpz_mat(gens)
+        B = L * self.A * L.transpose()
+        H, T = B.hnf(transform=True)
+        rank = sum(1 for i in range(len(gens)) if any(H[i, j] != 0 for j in range(len(gens))))
+        return (T * L).tolist()[:rank]
+    
+    def even_sublattice(self) -> List[List[int]]:
+        """Returns a basis for the biggest even sublattice of the lattice."""
+        if self.parity:
+            basis, _ = self.fibre_product([[self.A[i, i] % 2] for i in range(self.rank)], [[2]])
+            return basis
+        else:
+            return [[int(i == j) for i in range(self.rank)] for j in range(self.rank)]
+
     def dual_vec(self, u: List[int]) -> Tuple[List[int], int]:
         """Given a vector u, finds its divisibility d in the dual lattice and a vector v, such that (u, v) = d.
         Returns the pair (v, d)."""

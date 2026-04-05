@@ -19,5 +19,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# --- Auxiliary .py files ---
+# --- Auxiliary files ---
 run.py
+allcock
+out
+in

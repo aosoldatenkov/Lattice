@@ -1,4 +1,6 @@
 import flint as fl
+import sympy as sp
+from itertools import product
 from Lattice import Lattice
 from BinLattice import BinLattice, int_seq
 from typing import List, Iterator
@@ -8,30 +10,7 @@ import math
 import cdd
 import cdd.gmp
 from fractions import Fraction
-
-
-def fibre_product(A1: list[list[int]], A2: list[list[int]]) -> list[list[int]]:
-    n1 = len(A1)
-    n2 = len(A2)
-    if n1 == 0 or n2 == 0:
-        return []
-    M = fl.fmpz_mat(A1 + A2).transpose()
-    K, r = M.nullspace()
-    _H, T = K.hnf(transform=True)
-    B, _denom = T.inv().numer_denom()
-    C = B.transpose().tolist()[:r]
-    return [v[:n1] for v in C], [v[n1 : n1 + n2] for v in C]
-
-
-def image(A: list[list[int]]) -> list[list[int]]:
-    """Given a matrix A, returns a basis for the Z-span of its rows."""
-    M = np.array(A, dtype=object).transpose()
-    D, L, _R = smith_normal_form(M)
-    L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
-    n = min(M.shape)
-    r = sum(1 for i in range(n) if D[i, i] != 0)
-    T_list = (L_inv * fl.fmpz_mat(D.tolist())).transpose().tolist()
-    return [T_list[i] for i in range(r)]
+import re
 
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
@@ -69,8 +48,10 @@ def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[
 
 
 def order_vert(graph, v):
-    """Given a graph and a subset of its vertices, extracts the longest possible simple path from the given set of vertices,
-    removes those vertices, and then recursively does the same for the remaining vertices. Returns the concatenation of the paths found at each step."""
+    """Given a graph and a subset of its vertices, extracts the longest possible
+    simple path from that set of vertices, removes those vertices, and then
+    recursively does the same for the remaining vertices.
+    Returns the concatenation of the paths found at each step."""
     if not v:
         return []
     v_set = set(v)  # O(1) lookup for whether a node is in 'v'
@@ -223,6 +204,47 @@ def E_lat(n):
     A = [[2, 0, 0, -1] + [0] * (n - 4)] + [[-int(i == 2)] + A[i] for i in range(n - 1)]
     return Lattice(n, A)
 
+def U_lat(n = 1):
+    return Lattice(2, [[0, n], [n, 0]])
+
+def I_lat(p, q):
+    if p > 0 and q > 0:
+        return Lattice(1, [[1]]) * p + Lattice(1, [[-1]]) * q
+    elif p > 0 and  q <= 0:
+        return Lattice(1, [[1]]) * p
+    elif q > 0:
+        return Lattice(1, [[-1]]) * q
+    else:
+        raise ValueError("At least one of p or q must be positive.")
+
+
+def II_lat_n_1(n):
+    if (n - 1) % 8 != 0:
+        raise ValueError("n - 1 must be divisible by 8")
+    L = I_lat(n, 1)
+    basis = [[int(i == j) for j in range(n)] + [-1] for i in range(1, n)]
+    basis += [[0] * n + [2]]
+    basis += [[1] * n + [-1]]
+    A = L.batch_prod(basis, basis)
+    A[n][n - 1] //= 2
+    A[n - 1][n] //= 2
+    A[n][n] //= 4
+    return Lattice(len(basis), A)
+
+def Leech_lat():
+    M = II_lat_n_1(25)
+    v = [i + 1 for i in range(24)] + [185, 0]
+    compl = M.complement([v])
+    basis = M.subquotient(compl)
+    return Lattice(len(basis), M.batch_prod(basis, basis))
+
+def Leech_lat_alt():
+    M = I_lat(24, 1)
+    v = [2 * i + 1 for i in range(1, 24)] + [51, 145]
+    basis = M.complement([v])
+    return Lattice(len(basis), M.batch_prod(basis, basis))
+
+
 def E_lat_test(n):
     if n == 4:
         return A_lat(4)
@@ -255,3 +277,86 @@ def E_lat_test(n):
     sim = [sim[i] for i in order]
     A = M.batch_prod(sim, sim)
     return Lattice(len(sim), A)
+
+
+def hyp_basis_3d(L, bound = 10000):
+    if L.rank != 3:
+        raise ValueError("Lattice must be 3-dimensional")
+    if L.signature == (2, 1):
+        L = Lattice(3, (-L.A).tolist())
+    if L.signature != (1, 2):
+        raise ValueError("Lattice must have signature (1, 2) or (2, 1)")
+    
+    def decompose(L, u):
+        compl = fl.fmpz_mat(L.complement([u]))
+        v = L.dual_vec(u)[0]
+        if L.index(compl.tolist() + [v]) != 1:
+            raise ValueError("Error constructing decomposition")
+        M = compl * L.A * compl.transpose()
+        B = BinLattice(M[0, 0], M[1, 1], M[0, 1])
+        if B.signature != (0, 2):
+            raise ValueError("Error: the complement is not sign-definite")
+        basis = fl.fmpz_mat([list(B.can.e), list(B.can.f)])
+        compl = basis * compl
+        M = compl * L.A * compl.transpose()
+        B = fl.fmpz_mat(1, 3, v) * L.A * compl.transpose()
+        M_fl = np.array(M.tolist(), dtype=np.float64)
+        B_fl = np.array(B.tolist(), dtype=np.float64)
+        T = -np.linalg.inv(M_fl) @ B_fl.transpose()
+        T_int = fl.fmpz_mat(np.round(T).astype(int).tolist())
+        for delta in product([0, 1, -1], repeat=2):
+            v = (fl.fmpz_mat(1, 3, v) + (fl.fmpz_mat(1, 2, delta) + T_int.transpose()) * compl).tolist()[0]
+            if L.square(v) > 0:
+                return [v] + compl.tolist()
+        return None
+
+    for u in int_seq(3, nonzero=True, length=bound):
+        if math.gcd(*u) != 1:
+            continue
+        if L.square(u) > 0:
+            basis = decompose(L, u)
+            if basis is None:
+                continue
+            return basis
+    return None
+
+
+def Allcock_list(fin, fout):
+    with open(fin, "r") as f:
+        lattices = [re.findall(r'-?\d+', line.strip())[:10] for line in f.readlines()]
+    with open(fout, "w") as f:
+        for i, l in enumerate(lattices):
+            print('#' * 50 + f"{i + 1:^7}" + '#' * 50)
+            L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
+            print(L.info())
+            print('Gram matrix:')
+            print(L.A)
+            if L.signature != (2, 1):
+                print("Lattice does not have signature (2, 1), skipping...")
+                continue
+            print("LLL-reduced Gram matrix:")
+            try:
+                M = Lattice(3, L.lll())
+                reduced = True
+            except:
+                reduced = False
+            if not reduced:
+                try:
+                    M = Lattice(3, L._lll_indefinite_sp())
+                    reduced = True
+                except:
+                    print("Error occurred while computing LLL reduction. Lattice number", i + 1, file=f)
+                    print(L.A.tolist(), file=f)
+                    continue
+            print(M.A)
+            print("Constructing hyperbolic basis...")
+            basis = hyp_basis_3d(M)
+            if not basis:
+                print("No hyperbolic basis found, skipping...")
+                print(M.A.tolist(), file=f)
+                continue
+            N = Lattice(3, M.batch_prod(basis, basis))
+            print(N.info())
+            print(N.A)
+            print(N.A.tolist(), file=f)
+
