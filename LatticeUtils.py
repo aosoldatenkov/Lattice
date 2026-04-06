@@ -229,7 +229,7 @@ def II_lat_n_1(n):
     A[n][n - 1] //= 2
     A[n - 1][n] //= 2
     A[n][n] //= 4
-    return Lattice(len(basis), A)
+    return Lattice(n + 1, A)
 
 def Leech_lat():
     M = II_lat_n_1(25)
@@ -323,7 +323,7 @@ def hyp_basis_3d(L, bound = 10000):
 
 def Allcock_list(fin, fout):
     with open(fin, "r") as f:
-        lattices = [re.findall(r'-?\d+', line.strip())[:10] for line in f.readlines()]
+        lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
     with open(fout, "w") as f:
         for i, l in enumerate(lattices):
             print('#' * 50 + f"{i + 1:^7}" + '#' * 50)
