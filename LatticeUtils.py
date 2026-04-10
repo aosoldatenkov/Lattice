@@ -2,10 +2,10 @@ import flint as fl
 import sympy as sp
 from itertools import product
 from Lattice import Lattice
-from BinLattice import BinLattice, int_seq
+from BinLattice import BinLattice
+from IntVectors import *
 from typing import List, Iterator
 import numpy as np
-from hsnf import smith_normal_form
 import math
 import cdd
 import cdd.gmp
@@ -279,7 +279,7 @@ def E_lat_test(n):
     return Lattice(len(sim), A)
 
 
-def hyp_basis_3d(L, bound = 10000):
+def lorentz_basis_3d(L, bound = 10000):
     if L.rank != 3:
         raise ValueError("Lattice must be 3-dimensional")
     if L.signature == (2, 1):
@@ -350,7 +350,7 @@ def Allcock_list(fin, fout):
                     continue
             print(M.A)
             print("Constructing hyperbolic basis...")
-            basis = hyp_basis_3d(M)
+            basis = lorentz_basis_3d(M)
             if not basis:
                 print("No hyperbolic basis found, skipping...")
                 print(M.A.tolist(), file=f)
@@ -359,4 +359,48 @@ def Allcock_list(fin, fout):
             print(N.info())
             print(N.A)
             print(N.A.tolist(), file=f)
+
+def root_search(L):
+    
+    m = 2 * L.exp
+    e0 = [1] + [0] * (L.rank - 1)
+    a = int(L.square(e0))
+    if a <= 0:
+        raise ValueError("The lattice is not in a standard form")
+    check = {}
+    skip = set()
+
+    def decompose(b, c):
+        d = b ** 2 - a * c
+        if d < 0:
+            return []
+        t1, t2 = math.floor(-b / a), math.ceil((-b + math.sqrt(d)) / a)
+        result = []
+        for t in range(t1, t2 + 1):
+            val = a * (t ** 2) + 2 * b * t + c
+            if val < -m or val >= 0:
+                continue
+            if m % val == 0:
+                result.append(t)
+        return result
+    
+    bl = BatchGenerator(L.rank - 1, d = 10)
+    for v in bl.vectors():
+        e = [0] + list(v)
+        b = int(L.product(e, e0))
+        c = int(L.square(e))
+        if (b, c) in skip:
+            continue
+        elif (b, c) not in check:
+            t = decompose(b, c)
+            if len(t) == 0:
+                skip.add((b, c))
+                continue
+            check[(b, c)] = t
+        for t in check[(b, c)]:
+            u = [t] + list(v)
+            if math.gcd(*u) != 1:
+                continue
+            if L.is_root(u):
+                yield u
 
