@@ -11,6 +11,7 @@ import cdd
 import cdd.gmp
 from fractions import Fraction
 import re
+import random as rnd
 
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
@@ -82,6 +83,8 @@ def simple_roots(L, roots, dir = None):
     """Given a lattice L, a list of roots in L, and an optional direction dir,
     returns a list of simple roots for the root system spanned by the given roots.
     If dir is not provided, it will be chosen automatically."""
+    if len(roots) == 0:
+        return []
     if L.signature not in [(L.rank, 0), (0, L.rank)]:
         # Check if the sublattice spanned by the roots is sign-definite. If not, we can't pick simple roots.
         Sublat = L.saturate(roots)
@@ -90,7 +93,9 @@ def simple_roots(L, roots, dir = None):
             raise ValueError("The roots do not span a sign-definite sublattice, so we cannot pick simple roots.")
     if dir is None:
         # Pick a direction that is not orthogonal to any root. This will be used to determine which roots are positive.
-        for dir in int_seq(L.rank, nonzero=True):
+        rnd.seed(roots[0][0])
+        while True:
+            dir = [rnd.randint(1, 10 ** 6) for _ in range(L.rank)]
             if all(L.product(dir, r) != 0 for r in roots):
                 break
     pos_roots = [r for r in roots if L.product(dir, r) > 0]
@@ -360,47 +365,68 @@ def Allcock_list(fin, fout):
             print(N.A)
             print(N.A.tolist(), file=f)
 
-def root_search(L):
-    
-    m = 2 * L.exp
-    e0 = [1] + [0] * (L.rank - 1)
-    a = int(L.square(e0))
-    if a <= 0:
-        raise ValueError("The lattice is not in a standard form")
-    check = {}
-    skip = set()
 
-    def decompose(b, c):
-        d = b ** 2 - a * c
-        if d < 0:
-            return []
-        t1, t2 = math.floor(-b / a), math.ceil((-b + math.sqrt(d)) / a)
-        result = []
-        for t in range(t1, t2 + 1):
-            val = a * (t ** 2) + 2 * b * t + c
-            if val < -m or val >= 0:
-                continue
-            if m % val == 0:
-                result.append(t)
-        return result
+def Vinberg(L, root_batch = 100):
+    """Runs Vinberg's algorithm on a Lorentzian lattice L.
+    The lattice should be of signature (1, n).
+    Constructs a list of negative simple roots.
+    Terminates after finitely many steps if the lattice is reflective."""
+
+    # Check the signature
+    if L.signature[0] != 1:
+        raise ValueError("The lattice should be of signature (1, n)")
     
-    bl = BatchGenerator(L.rank - 1, d = 10)
-    for v in bl.vectors():
-        e = [0] + list(v)
-        b = int(L.product(e, e0))
-        c = int(L.square(e))
-        if (b, c) in skip:
-            continue
-        elif (b, c) not in check:
-            t = decompose(b, c)
-            if len(t) == 0:
-                skip.add((b, c))
-                continue
-            check[(b, c)] = t
-        for t in check[(b, c)]:
-            u = [t] + list(v)
+    # Check if the given basis is suitable, i.e. if the first vector is positive
+    basis = [[int(i == j) for j in range(L.rank)] for i in range(L.rank)]
+    if L.square(basis[0]) <= 0:
+        # If the first vector is not positive, change the basis
+        for u in int_seq(L.rank, nonzero=True):
             if math.gcd(*u) != 1:
                 continue
-            if L.is_root(u):
-                yield u
+            if L.square(u) > 0:
+                v = L.dual_vec(u)[0]
+                compl = L.complement([v])
+                basis = [u] + compl
+                break
+        M = L.batch_prod(basis, basis)
+        L = Lattice(L.rank, M)
 
+    def Walls(L, roots):
+        distances = sorted(roots.keys())
+        walls = [] if len(roots[0]) == 0 else simple_roots(L, roots[0])
+        for d in distances:
+            if d == 0:
+                continue
+            for r in roots[d]:
+                if all(L.product(r, w) >= 0 for w in walls):
+                    walls.append(r)
+        return walls
+
+    roots = defaultdict(list)
+    count = 0
+    base = [1] + [0] * (L.rank - 1)
+    VS = VectorSearch(L)
+    for v in VS.roots_neg():
+        prod = L.product(base, v)
+        if prod < 0:
+            continue
+        roots[fl.fmpq(prod ** 2, abs(L.square(v)))].append(v)
+        count += 1
+        print(f"Found {count} roots\r", end='')
+        if count % root_batch == 0:
+            print("\nComputing walls...", end='')
+            walls = Walls(L, roots)
+            print(f"{len(walls)}\nComputing extremal rays...")
+            rays, lines = get_extremal_rays(walls, L.A)
+            if len(lines) > 0:
+                print("The cone is not pointed, looking for more roots...")
+            else:
+                s = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
+                if all(x >= 0 for x in s):
+                    print("The fundamental domain has finite volume")
+                    break
+                else:
+                    print("The volume is infinite, looking for more roots...")
+    B = fl.fmpz_mat(basis)
+    W = fl.fmpz_mat(walls)
+    return (W * B).tolist()

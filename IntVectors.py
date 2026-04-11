@@ -2,6 +2,8 @@ from itertools import product
 import math
 from collections import defaultdict
 from typing import List, Optional, Iterator
+import flint as fl
+from Lattice import *
 
 def int_seq(dim: int, signs: Optional[List[int]] = None, nonzero: bool = False, length: int = -1) -> Iterator[List[int]]:
     """Lists all integer sequences of length dim, with given restrictions on signs"""
@@ -86,3 +88,64 @@ class BatchGenerator:
         for block in self.blocks():
             for v in block:
                 yield v
+
+
+class VectorSearch:
+
+    def __init__(self, L: Lattice):
+        self.L = L
+
+    def all_roots(self):
+        bl = BatchGenerator(self.L.rank, d = 10, max_size = 10 ** 6)
+        for v in bl.vectors():
+            if math.gcd(*v) != 1:
+                continue
+            if self.L.is_root(v):
+                yield v
+        
+    def roots_neg(self):
+        """Lists the negative roots of a Lorentzian lattice in the positive
+        half-space defined by the product with the first basis element.
+        The first basis element should be positive"""
+
+        e0 = [1] + [0] * (self.L.rank - 1)
+        a = int(self.L.square(e0))
+        if a <= 0:
+            raise ValueError("The lattice is not in a standard form")
+        m = 2 * self.L.exp
+        check = {}
+        skip = set()
+
+        def decompose(b, c):
+            d = b ** 2 - a * c
+            if d < 0:
+                return []
+            t1, t2 = math.ceil(-b / a), math.ceil((-b + math.sqrt(d)) / a)
+            result = []
+            for t in range(t1, t2 + 1):
+                val = a * (t ** 2) + 2 * b * t + c
+                if val < -m or val >= 0:
+                    continue
+                if m % val == 0:
+                    result.append(t)
+            return result
+        
+        bl = BatchGenerator(self.L.rank - 1, d = 10, max_size = 10 ** 6)
+        for v in bl.vectors():
+            e = [0] + list(v)
+            b = int(self.L.product(e, e0))
+            c = int(self.L.square(e))
+            if (b, c) in skip:
+                continue
+            elif (b, c) not in check:
+                t = decompose(b, c)
+                if len(t) == 0:
+                    skip.add((b, c))
+                    continue
+                check[(b, c)] = t
+            for t in check[(b, c)]:
+                u = [t] + list(v)
+                if math.gcd(*u) != 1:
+                    continue
+                if self.L.is_root(u):
+                    yield u

@@ -144,7 +144,7 @@ class Lattice:
         B = U * self.A * U.transpose()
         return B.tolist()
 
-    def _lll_indefinite_sp(self) -> None:
+    def _lll_indefinite_sp(self, precision = 50, rescale = 1e15) -> None:
         """
         Applies LLL reduction to an indefinite lattice
         using a positive-definite majorant metric.
@@ -155,10 +155,10 @@ class Lattice:
         """
         A_sp = sp.Matrix(self.A.tolist())
         P, D = A_sp.diagonalize()
-        D = sp.N(D, 50).as_real_imag()[0]
-        P = sp.N(P, 50).as_real_imag()[0]
+        D = sp.N(D, precision).as_real_imag()[0]
+        P = sp.N(P, precision).as_real_imag()[0]
         M = P * D.applyfunc(lambda x: abs(x)) * P.inv()
-        M = M * 1e15
+        M = M * rescale
         M = M.applyfunc(lambda x: int(x.round()))
         B = (M.cholesky(hermitian=True)).evalf()
         B = B.applyfunc(lambda x: int(x.round()))
