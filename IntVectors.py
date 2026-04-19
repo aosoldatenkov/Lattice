@@ -66,6 +66,50 @@ def int_seq_r(dim: int, max_rr: int = 10 ** 100) -> Iterator[tuple[int]]:
         yield v
 
 
+def fincke_pohst_search(A: np.ndarray, b: np.array, lbound: float, ubound: float) -> Iterator[List[int]]:
+    """
+    Finds all integer vectors x such that lbound < (x + b)^T A (x + b) <= ubound.
+    Uses Cholesky decomposition for O(sqrt(bound)^rank) performance.
+    """
+    rank = A.shape[0]
+    # Cholesky decomposition: M = R^T R (R is upper triangular)
+    # We add a tiny epsilon to the diagonal for numerical stability on float matrices
+    R = np.linalg.cholesky(A + np.eye(rank) * 1e-10).T 
+    # State arrays for the DFS
+    x = [0] * rank
+    dist = np.zeros(rank)
+    # Start at the last coordinate (bottom of the tree)
+    k = rank - 1
+    # Compute the center and bounds for the current coordinate
+    z = np.zeros(rank)
+    x[k] = math.floor(math.sqrt(ubound / (R[k, k]**2)) - b[k])
+    while True:
+        # Calculate the partial distance
+        d = dist[k] + R[k, k]**2 * (x[k] + b[k] - z[k])**2
+        if d <= ubound:
+            if k == 0:
+                # We reached a leaf node (a complete valid vector)
+                if d > lbound: # Check the lower bound
+                    yield x
+                elif x[k] > z[k]:
+                     x[k] = math.floor(2 * z[k] - x[k]) + 1
+                # Backtrack
+                x[k] -= 1
+            else:
+                # Move down the tree
+                k -= 1
+                dist[k] = dist[k + 1] + R[k + 1, k + 1]**2 * (x[k + 1] + b[k + 1] - z[k + 1])**2
+                # Update the center z for the new level
+                z[k] = -sum(R[k, j] * (x[j] + b[j]) for j in range(k + 1, rank)) / R[k, k]
+                # Set the upper bound for this coordinate
+                x[k] = math.floor(math.sqrt((ubound - dist[k]) / (R[k, k]**2)) + z[k] - b[k])
+        else:
+            # Prune the branch and step back up
+            k += 1
+            if k == rank:
+                break
+            x[k] -= 1
+
 class BatchGenerator:
 
     def __init__(self, dim: int, d: int = 3, symmetric: bool = True, max_size: Optional[int] = None):
@@ -95,8 +139,9 @@ class VectorSearch:
     def __init__(self, L: Lattice):
         self.L = L
 
-    def all_roots(self):
-        bl = BatchGenerator(self.L.rank, d = 10, max_size = 10 ** 6)
+    def roots(self):
+        """Lists all roots of the lattice"""
+        bl = BatchGenerator(self.L.rank, d = 10, max_size = 10 ** 8)
         for v in bl.vectors():
             if math.gcd(*v) != 1:
                 continue
@@ -130,7 +175,7 @@ class VectorSearch:
                     result.append(t)
             return result
         
-        bl = BatchGenerator(self.L.rank - 1, d = 10, max_size = 10 ** 6)
+        bl = BatchGenerator(self.L.rank - 1, d = 10, max_size = 10 ** 8)
         for v in bl.vectors():
             e = [0] + list(v)
             b = int(self.L.product(e, e0))

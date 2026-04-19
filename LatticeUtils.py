@@ -119,54 +119,6 @@ def majorant(A_matrix: np.ndarray) -> np.ndarray:
     M = eivec @ np.diag(eival_abs) @ eivec.T
     return M
 
-
-def fincke_pohst_search(M: np.ndarray, bound: float) -> Iterator[List[int]]:
-    """
-    Finds all integer vectors x such that x^T M x <= bound.
-    Uses Cholesky decomposition for O(sqrt(bound)^rank) performance.
-    """
-    rank = M.shape[0]
-    # Cholesky decomposition: M = R^T R (R is upper triangular)
-    # We add a tiny epsilon to the diagonal for numerical stability on float matrices
-    R = np.linalg.cholesky(M + np.eye(rank) * 1e-10).T 
-    # Store found vectors
-    results = []
-    # State arrays for the DFS
-    x = np.zeros(rank)
-    dist = np.zeros(rank)
-    # Start at the last coordinate (bottom of the tree)
-    k = rank - 1
-    # Compute the center and bounds for the current coordinate
-    z = np.zeros(rank)
-    z[k] = 0.0
-    x[k] = math.floor(math.sqrt((bound - dist[k]) / (R[k, k]**2)) + z[k])
-    while True:
-        # Calculate the partial distance
-        d = bound - dist[k] - R[k, k]**2 * (x[k] - z[k])**2
-        if d >= 0:
-            if k == 0:
-                # We reached a leaf node (a complete valid vector)
-                v = np.round(x).astype(int)
-                if np.any(v): # Ignore the zero vector
-                    yield [int(coord) for coord in v]
-                # Backtrack
-                x[k] -= 1
-            else:
-                # Move down the tree
-                k -= 1
-                dist[k] = dist[k + 1] + R[k + 1, k + 1]**2 * (x[k + 1] - z[k + 1])**2
-                # Update the center z for the new level
-                z[k] = -sum(R[k, j] * x[j] for j in range(k + 1, rank)) / R[k, k]
-                # Set the upper bound for this coordinate
-                x[k] = math.floor(math.sqrt((bound - dist[k]) / (R[k, k]**2)) + z[k])
-        else:
-            # Prune the branch and step back up
-            k += 1
-            if k == rank:
-                break # Tree exhausted
-            x[k] -= 1
-    return results
-
 def A_lat(n):
     I = Lattice(1, [[1]])
     R = I * (n + 1)
