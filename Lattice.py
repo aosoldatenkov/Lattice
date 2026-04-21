@@ -272,7 +272,7 @@ class Lattice:
         Returns the pair (v, d)."""
         B = self.A * fl.fmpz_mat(self.rank, 1, u)
         H, T = B.hnf(transform=True)
-        return T.tolist()[0], H[0, 0]
+        return T.tolist()[0], int(H[0, 0])
     
     def make_primitive(self) -> Lattice:
         d = math.gcd(*self.dgroup)

@@ -343,6 +343,17 @@ def Vinberg(L, root_batch = 100):
         M = L.batch_prod(basis, basis)
         L = Lattice(L.rank, M)
 
+    roots = defaultdict(list)
+    compl = L.complement([[1] + [0] * (L.rank - 1)])
+    C = Lattice(L.rank - 1, L.batch_prod(compl, compl))
+    A = np.array(C.A.tolist(), dtype = float)
+    compl = fl.fmpz_mat(compl)
+    for u in fincke_pohst_search(-A, np.zeros(L.rank - 1), 0.5, 2 * L.exp + 0.5):
+        v = (fl.fmpz_mat(1, L.rank - 1, u) * compl).tolist()[0]
+        if L.is_root(v):
+            roots[0].append([int(x) for x in v])
+    print(f"Found {len(roots[0])} roots passing through the base point")
+
     def Walls(L, roots):
         distances = sorted(roots.keys())
         walls = [] if len(roots[0]) == 0 else simple_roots(L, roots[0])
@@ -354,13 +365,12 @@ def Vinberg(L, root_batch = 100):
                     walls.append(r)
         return walls
 
-    roots = defaultdict(list)
     count = 0
     base = [1] + [0] * (L.rank - 1)
     VS = VectorSearch(L)
     for v in VS.roots_neg():
         prod = L.product(base, v)
-        if prod < 0:
+        if prod <= 0:
             continue
         roots[fl.fmpq(prod ** 2, abs(L.square(v)))].append(v)
         count += 1
