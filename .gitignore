@@ -20,7 +20,6 @@ Thumbs.db
 .idea/
 
 # --- Auxiliary files ---
-run.py
 allcock
 out
 in

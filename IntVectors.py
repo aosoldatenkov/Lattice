@@ -91,6 +91,8 @@ def fincke_pohst_search(A: np.ndarray, b: np.array, lbound: float, ubound: float
                 # We reached a leaf node (a complete valid vector)
                 if d > lbound: # Check the lower bound
                     yield x
+                elif x[k] + b[k] > z[k]:
+                    x[k] = min(x[k], math.ceil(2 * (z[k] - b[k]) - x[k]) + 1)
                 # Backtrack
                 x[k] -= 1
             else:
