@@ -6,7 +6,7 @@ from LatticeUtils import *
 from IntVectors import *
 
 
-class Vinberg_:
+class Vinberg:
 
     def __init__(self, L: Lattice):
         # The lattice L should be of signature (1, n)

@@ -20,6 +20,7 @@ Thumbs.db
 .idea/
 
 # --- Auxiliary files ---
+old.py
 allcock
 out
 in
