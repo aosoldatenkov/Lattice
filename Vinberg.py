@@ -6,7 +6,7 @@ from LatticeUtils import *
 from IntVectors import *
 
 
-class Vinberg:
+class Vinberg_:
 
     def __init__(self, L: Lattice):
         # The lattice L should be of signature (1, n)
@@ -31,8 +31,8 @@ class Vinberg:
 
     def _init_basis(self):
         rank = self.L.rank
-        axis, d = self.L.dual_vec(self.base)
-        if self.L.product(self.base, axis) != d:
+        axis, self.d = self.L.dual_vec(self.base)
+        if self.L.product(self.base, axis) != self.d:
             raise ValueError("Error computing the dual vector")
         compl = self.L.complement([self.base])
         self.basis = [axis] + compl
@@ -46,26 +46,71 @@ class Vinberg:
     def _init_chamber(self):
         self.walls = defaultdict(list)
         self.roots = defaultdict(list)
+        r = []
         A = np.array(self.C.A.tolist(), dtype = float)
         for u in fincke_pohst_search(-A, np.zeros(self.L.rank - 1), 0.5, 2 * self.L.exp + 0.5):
             v = [0] + [int(x) for x in u]
             if self.M.is_root(v):
-                self.roots[0].append(v)
-        self.walls[0] = simple_roots(self.L, self.roots[0])
-        self.h = 0
+                r.append(v)
+        self.walls[0] = simple_roots(self.M, r)
         
     def print_info(self):
-        print(f"Using {self.basis[0]} with square {int(self.M.A[0, 0])} as the main axis")
-        print(f"Found {len(self.walls[0])} walls passing through the base point")
+        print(f"Using {self.base} as the base point")
+        print(f"Using the basis {self.basis}")
+        print("The Gram matrix in this basis:")
+        print(self.M.A)
+        #print(f"Using {self.basis[0]} with square {int(self.M.A[0, 0])} as the main axis")
+        if len(self.walls[0]) > 0:
+            B = fl.fmpz_mat(self.basis)
+            W = fl.fmpz_mat(self.walls[0])
+            print(f"Walls passing through the base point: {(W * B).tolist()}")
+        else:
+            print("No walls pass through the base point")
 
     def update_walls(self):
-        new_roots = defaultdict(list)
         new_walls = defaultdict(list)
-        new_walls[0] = self.walls[0]
-        distances = sorted(self.roots.keys())
+        new_walls[0] = self.walls[0].copy()
+        wall_list = self.walls[0]
+        distances = sorted(list(self.roots.keys()))
         for d in distances:
             if d == 0:
                 continue
             for r in self.roots[d]:
-                if all(self.L.product(r, w) >= 0 for w in self.walls):
-                    new_walls.append(r)
+                if all(self.M.product(r, w) >= 0 for w in wall_list):
+                    new_walls[d].append(r)
+                    wall_list.append(r)
+        self.walls = new_walls
+        self.roots = new_walls.copy()
+
+    def run(self, max_height : int, batch_size = 10000):
+        count_v = count_r = 0
+        A = np.array(self.C.A.tolist(), dtype = float)
+        walls = []
+        for h in range(1, max_height):
+            bnum, bden = (h * self.b).numer_denom()
+            bound = self.s * h ** 2
+            for u in fincke_pohst_search(-A, np.array([float(x) / float(bden) for x in bnum.tolist()[0]], dtype = float), \
+                                        0.5 + float(bound.p) / float(bound.q), 2 * self.L.exp + 0.5 + float(bound.p) / float(bound.q)):
+                print(f"Height {h}, {count_v} vectors, {count_r} roots, {len(walls)} walls", end = "\r")
+                count_v += 1
+                v = [h] + u
+                sq = self.M.square(v)
+                if not self.M.is_root(v) or sq > 0:
+                    continue
+                count_r += 1
+                print(f"Height {h}, {count_v} vectors, {count_r} roots, {len(walls)} walls", end = "\r")
+                prod = h * self.d
+                self.roots[fl.fmpq(prod ** 2, abs(sq))].append(v)
+                if count_r % batch_size != 0:
+                    continue
+                self.update_walls()
+                walls = sum(self.walls.values(), start=[])
+                print(f"Height {h}, {count_v} vectors, {count_r} roots, {len(walls)} walls", end = "\r")
+                rays, lines = get_extremal_rays(walls, self.M.A)
+                if len(lines) == 0:
+                    squares = [(fl.fmpq_mat(1, self.M.rank, ray) * self.M.A * fl.fmpq_mat(self.M.rank, 1, ray))[0, 0] for ray in rays]
+                    if all(x >= 0 for x in squares):
+                        print("\nThe fundamental domain has finite volume")
+                        B = fl.fmpz_mat(self.basis)
+                        W = fl.fmpz_mat(walls)
+                        return (W * B).tolist()

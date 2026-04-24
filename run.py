@@ -10,7 +10,7 @@ from Lattice import *
 from collections import defaultdict
 from LatticeUtils import *
 from IntVectors import *
-import time
+from Vinberg import *
 
 def split_Un(L):
     nmin = abs(L.disc)
@@ -117,7 +117,7 @@ def Vinberg2(L, root_batch = 1000):
     A = np.array(C.A.tolist(), dtype = float)
     b = np.array(M.A.tolist()[0][1:], dtype = float)
     b = b @ np.linalg.inv(A)
-    axis = [u[i] - sum(compl[j][i] * int(b[j]) for j in range(L.rank - 1)) for i in range(L.rank)]
+    axis = [axis[i] - sum(compl[j][i] * int(b[j]) for j in range(L.rank - 1)) for i in range(L.rank)]
     basis = [axis] + compl
     M = Lattice(L.rank, L.batch_prod(basis, basis))
     print(f"Using {axis} with square {int(M.A[0, 0])} and divisibility {d} as the main axis")
@@ -180,19 +180,27 @@ def Vinberg2(L, root_batch = 1000):
 
 # with open('in', "r") as f:
 #     lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-# for j, l in enumerate(lattices):
+# for j, l in enumerate(lattices[2080:]):
 #         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
 #         L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
 #         print(L.info())
 #         print(L.A)
-#         print(Vinberg2(L, root_batch=100))
+#         #print(Vinberg2(L, root_batch=100))
+#         V = Vinberg_(L)
+#         V.print_info()
+#         print(V.run(10 ** 100, batch_size=100))
 
-# I = I_lat(1, 21)
-# basis = [[2] + [0] * 21] + [[int(i == j) - int(i == j - 1) for j in range(22)] for i in range(21)]
-# L = Lattice(22, I.batch_prod(basis, basis))
-L = I_lat(1, 16)
+L = Leech_lat_alt()
+L = Lattice(L.rank, L.lll())
 print(L.info())
-Vinberg2(L, root_batch=1000000)
+print(L.A)
+count = 0
+for v in fincke_pohst_search(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank), 0, 4.5):
+    if L.square(v) == 4:
+        count += 1
+        print(f"{count}", end='\r')
+print()
+
 
 # A = -np.array(L.batch_prod(basis, basis), dtype=float)
 # count = 0
