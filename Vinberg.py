@@ -5,9 +5,67 @@ from Lattice import *
 from LatticeUtils import *
 from IntVectors import *
 from FPSearch import *
+from VSearch import *
 import fp_search_cpp
 
+
 class Vinberg:
+
+    def __init__(self, L: Lattice):
+        # The lattice L should be of signature (1, n)
+        if L.signature[0] != 1:
+            raise ValueError("The lattice should be of signature (1, n)")
+        self.L = L
+        # Check if the given basis is suitable
+        if L.A[0, 0] > 0:
+            self.base = [1] + [0] * (L.rank - 1)
+        else:
+            # If the first vector is not positive, change the basis
+            for u in int_seq(L.rank, nonzero=True):
+                if math.gcd(*u) != 1:
+                    continue
+                if L.square(u) > 0:
+                    self.base = u
+                    break
+        self._init_basis()
+
+    def _init_basis(self):
+        rank = self.L.rank
+        axis, self.d = self.L.dual_vec(self.base)
+        if self.L.product(self.base, axis) != self.d:
+            raise ValueError("Error computing the dual vector")
+        compl = self.L.complement([self.base])
+        self.basis = [axis] + compl
+        self.M = Lattice(rank, self.L.batch_prod(self.basis, self.basis))
+        self.VS = VSearch(self.M.A, self.M.exp, h_batch=5)
+
+    def print_info(self):
+        print(f"Using {self.base} as the base point")
+        print(f"Using the basis {self.basis}")
+        print("The Gram matrix in this basis:")
+        print(self.M.A)
+        print(f"Root system at the base point: f{len(self.VS.R.pos_roots)} positive roots")
+        B = fl.fmpz_mat(self.basis)
+        print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
+
+    def run(self, root_batch = 1000):
+        count = 0
+        while True:
+            count += 1
+            self.VS.run(root_batch=root_batch, use_reflections=False)
+            walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
+            walls = [[int(x) for x in w.tolist()[0]] for w in walls]
+            print(f"Iteration {count}; {len(walls)} walls", end='\r')
+            rays, lines = get_extremal_rays(walls, self.VS.A)
+            if len(lines) == 0:
+                squares = [(fl.fmpq_mat(1, self.L.rank, ray) * self.VS.A * fl.fmpq_mat(self.L.rank, 1, ray))[0, 0] for ray in rays]
+                if all(x >= 0 for x in squares):
+                    print("\nThe fundamental domain has finite volume")
+                    print(walls)
+                    break
+
+
+class VinbergOld:
 
     def __init__(self, L: Lattice):
         # The lattice L should be of signature (1, n)

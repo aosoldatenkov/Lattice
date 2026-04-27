@@ -77,24 +77,18 @@ def CheckAllcock():
             V.print_info()
             print(V.run(10 ** 100, root_batch=100))
 
-L = I_lat(1, 10)
-print(L.info())
-print(L.A)
-V = VSearch(L.A, 1)
-v = fl.fmpz_mat(1, L.rank, [rnd.randint(1, 10 ** 6) for _ in range(L.rank)])
-while True:
-    V.run(root_batch=1000)
-    walls = V.R.sroots + sum(V.walls.values(), start=[])
-    walls = [[int(x) for x in w.tolist()[0]] for w in walls]
-    print(f"{len(walls)} walls")
-    rays, lines = get_extremal_rays(walls, V.A)
-    if len(lines) == 0:
-        squares = [(fl.fmpq_mat(1, V.rank, ray) * V.A * fl.fmpq_mat(V.rank, 1, ray))[0, 0] for ray in rays]
-        if all(x >= 0 for x in squares):
-            print("The fundamental domain has finite volume")
-            print(walls)
-            break
-print(V.R.cache_hit, V.R.cache_miss)
+
+with open('in', "r") as f:
+    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    for j, l in enumerate(lattices):
+        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+        print(L.info())
+        print(L.A)
+        V = Vinberg(L)
+        V.run()
+        print(f"Cache hit/miss: {V.VS.R.cache_hit}/{V.VS.R.cache_miss}")
+
 # # Initialize the bound C++ class
 # searcher = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 6.5)
 

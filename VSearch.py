@@ -92,7 +92,11 @@ class RootSys:
                 new_c = self.closed_chamber(v * self.reflection(self.pos_roots[i]))
                 if new_c in self.cache_c:
                     self.cache_hit += 1
-                    return r * self.reflection(self.pos_roots[i]) * self.cache_r[self.cache_c.index(new_c)]
+                    self.cache_c.append(c)
+                    self.cache_r.append(r * self.reflection(self.pos_roots[i]) * self.cache_r[self.cache_c.index(new_c)])
+                    return self.cache_r[-1]
+                else:
+                    self.cache_miss += 1
                 new_height = sum(1 for j in range(len(self.pos_roots)) if new_c[j] < 0)
                 if new_height < height:
                     c = new_c
@@ -126,6 +130,7 @@ class VSearch:
         self.s = self.A[0, 0] - (self.b * self.C * self.b.transpose())[0, 0]
         if self.s <= 0:
             raise ValueError("Error initializing the basis: s is non-positive")
+        roots = []
         FPS = fp_search_cpp.FPSearch(np.array((-self.C).tolist(), dtype=float),
                                     np.zeros(self.rank - 1, dtype=float),
                                     0, 2 * self.exp + 0.5)
@@ -133,7 +138,6 @@ class VSearch:
             vecs = FPS.batch_search(10 ** 6)
             if not vecs:
                 break
-            roots = []
             for u in vecs:
                 v = fl.fmpz_mat(1, self.rank, [0] + [int(x) for x in u])
                 if self._is_root(v):
@@ -181,7 +185,7 @@ class VSearch:
             vecs.extend([fl.fmpz_mat(1, self.rank, [self.FPS[i][0]] + v) for v in vv])
         return vecs
 
-    def run(self, root_batch = 10000):
+    def run(self, root_batch = 10000, use_reflections = True):
         count_v = count_r = 0
         while True:
             vecs = self._run_fps()
@@ -190,9 +194,9 @@ class VSearch:
                 sq = (v * self.A * v.transpose())[0, 0]
                 if not self._is_root(v) or sq > 0:
                     continue
-                v = v * self.R.find_reflection(v)
+                if use_reflections:
+                    v = v * self.R.find_reflection(v)
                 count_r += 1
-                print(count_v, count_r, end='\r')
                 self.roots[fl.fmpq(int(v[0, 0]) ** 2, abs(int(sq)))].append(v)
             if count_r >= root_batch:
                 self.update_walls()
