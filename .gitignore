@@ -20,6 +20,9 @@ Thumbs.db
 .idea/
 
 # --- Auxiliary files ---
+Eigen/
+*.so
+fp_search__.cpp
 old.py
 allcock
 out

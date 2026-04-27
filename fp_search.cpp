@@ -45,11 +45,15 @@ public:
         }
     }
 
+    bool exhausted() {
+        return rank == 0 || k == rank;
+    }
+
     std::vector<std::vector<int>> batch_search(int size) {
         std::vector<std::vector<int>> vecs;
         
         // Return early if the search space is exhausted or invalid
-        if (rank == 0 || k == rank) {
+        if (exhausted()) {
             return vecs;
         }
 
@@ -112,5 +116,6 @@ PYBIND11_MODULE(fp_search_cpp, m) {
     py::class_<FPSearch>(m, "FPSearch")
         .def(py::init<Eigen::MatrixXd, Eigen::VectorXd, double, double>(),
              py::arg("A"), py::arg("b"), py::arg("lbound"), py::arg("ubound"))
-        .def("batch_search", &FPSearch::batch_search, py::arg("size"));
+        .def("batch_search", &FPSearch::batch_search, py::arg("size"))
+        .def("exhausted", &FPSearch::exhausted);
 }

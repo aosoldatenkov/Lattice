@@ -11,6 +11,9 @@ from collections import defaultdict
 from LatticeUtils import *
 from IntVectors import *
 from Vinberg import *
+from FPSearch import *
+from VSearch import *
+import fp_search_cpp
 
 class DiscForm:
 
@@ -60,31 +63,65 @@ class DiscForm:
             current = [i]
             dfs(current)
         return max_isospaces
-    
 
+def CheckAllcock():
+    with open('in', "r") as f:
+        lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    for j, l in enumerate(lattices):
+            print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+            L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+            print(L.info())
+            print(L.A)
+            #print(Vinberg2(L, root_batch=100))
+            V = Vinberg(L)
+            V.print_info()
+            print(V.run(10 ** 100, root_batch=100))
 
-# with open('in', "r") as f:
-#     lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-# for j, l in enumerate(lattices[2080:]):
-#         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-#         L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
-#         print(L.info())
-#         print(L.A)
-#         #print(Vinberg2(L, root_batch=100))
-#         V = Vinberg(L)
-#         V.print_info()
-#         print(V.run(10 ** 100, batch_size=100))
-
-L = Leech_lat_alt()
-L = Lattice(L.rank, L.lll())
+L = I_lat(1, 10)
 print(L.info())
 print(L.A)
-count = 0
-for v in fincke_pohst_search(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank), 0, 4.5):
-    if L.square(v) == 4:
-        count += 1
-        print(f"{count}", end='\r')
-print()
+V = VSearch(L.A, 1)
+v = fl.fmpz_mat(1, L.rank, [rnd.randint(1, 10 ** 6) for _ in range(L.rank)])
+while True:
+    V.run(root_batch=1000)
+    walls = V.R.sroots + sum(V.walls.values(), start=[])
+    walls = [[int(x) for x in w.tolist()[0]] for w in walls]
+    print(f"{len(walls)} walls")
+    rays, lines = get_extremal_rays(walls, V.A)
+    if len(lines) == 0:
+        squares = [(fl.fmpq_mat(1, V.rank, ray) * V.A * fl.fmpq_mat(V.rank, 1, ray))[0, 0] for ray in rays]
+        if all(x >= 0 for x in squares):
+            print("The fundamental domain has finite volume")
+            print(walls)
+            break
+
+# # Initialize the bound C++ class
+# searcher = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 6.5)
+
+# # Pull results
+# batch_size = 20000000
+
+# while True:
+#     results = searcher.batch_search(batch_size)
+#     if not results:
+#         break
+#     for vec in results:
+#         if L.square(vec) == 6:
+#             count += 1
+#         print(f"{count}", end='\r')
+# print(count)
+
+
+# L = E_lat(8)
+# print(L.info())
+# print(L.A)
+# count = 0
+# FPS = FPSearch(L.A.tolist(), [0] * 8, 0, 2.5)
+# vecs = FPS.batch_search(1000)
+# for v in vecs:
+#     if L.square(v) == 2:
+#         count += 1
+# print(count)
 
 
 # A = -np.array(L.batch_prod(basis, basis), dtype=float)

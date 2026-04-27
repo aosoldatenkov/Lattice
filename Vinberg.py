@@ -82,7 +82,7 @@ class Vinberg:
         self.walls = new_walls
         self.roots = new_walls.copy()
 
-    def run(self, max_height : int, root_batch = 10000, height_batch = 3):
+    def run(self, max_height: int, root_batch = 10000, height_batch = 3):
         count_v = count_r = 0
         A = np.array(self.C.A.tolist(), dtype = float)
         walls = []
