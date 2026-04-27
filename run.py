@@ -94,7 +94,7 @@ while True:
             print("The fundamental domain has finite volume")
             print(walls)
             break
-
+print(V.R.cache_hit, V.R.cache_miss)
 # # Initialize the bound C++ class
 # searcher = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 6.5)
 

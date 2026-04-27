@@ -15,6 +15,8 @@ class RootSys:
         self._simple_roots([fl.fmpz_mat(1, self.A.ncols(), r) for r in roots], b)
         self.cache_c = deque(maxlen = cache_size)
         self.cache_r = deque(maxlen = cache_size)
+        self.cache_hit = 0
+        self.cache_miss = 0
         
     def _simple_roots(self, roots, base = None):
         self.sroots = []
@@ -81,26 +83,31 @@ class RootSys:
     def find_reflection(self, v):
         c = self.closed_chamber(v)
         if c in self.cache_c:
+            self.cache_hit += 1
             return self.cache_r[self.cache_c.index(c)]
-        self.cache_c.append(c)
         r = self.eye
         while any(x < 0 for x in c):
             height = sum(1 for j in range(len(self.pos_roots)) if c[j] < 0)
             for i in [j for j in range(len(self.pos_roots)) if c[j] < 0]:
                 new_c = self.closed_chamber(v * self.reflection(self.pos_roots[i]))
+                if new_c in self.cache_c:
+                    self.cache_hit += 1
+                    return r * self.reflection(self.pos_roots[i]) * self.cache_r[self.cache_c.index(new_c)]
                 new_height = sum(1 for j in range(len(self.pos_roots)) if new_c[j] < 0)
                 if new_height < height:
                     c = new_c
                     r = r * self.reflection(self.pos_roots[i])
                     v = v * self.reflection(self.pos_roots[i])
                     break
+        self.cache_miss += 1
+        self.cache_c.append(c)
         self.cache_r.append(r)
         return r
     
 
 class VSearch:
 
-    def __init__(self, A: fl.fmpz_mat, exp: int, h_batch: int = 3):
+    def __init__(self, A: fl.fmpz_mat, exp: int, h_batch: int = 1):
         self.A = A
         self.exp = exp
         self.C = fl.fmpz_mat([v[1:] for v in A.tolist()[1:]])
