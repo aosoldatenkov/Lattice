@@ -14,6 +14,7 @@ from Vinberg import *
 from FPSearch import *
 from VSearch import *
 import fp_search_cpp
+import vsearch_cpp
 
 class DiscForm:
 
@@ -89,13 +90,20 @@ def CheckAllcock():
 #         V.run()
 #         print(f"Cache hit/miss: {V.VS.R.cache_hit}/{V.VS.R.cache_miss}")
 
-L = I_lat(1, 14)
+L = E_lat(8)
 print(L.info())
 print(L.A)
-V = Vinberg(L, h_batch=5, use_reflections=False)
-V.print_info()
-print(V.run(root_batch=100000))
-print(f"Cache hit/miss: {V.VS.R.cache_hit}/{V.VS.R.cache_miss}")
+FPS = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 2.5)
+vecs = FPS.batch_search(10 ** 5)
+roots = []
+for v in vecs:
+    if L.is_root(v):
+        roots.append(v)
+print(f"Found {len(roots)} roots")
+R = RootSys(L.A, roots, base = [i ** 2 + 11 for i in range(L.rank)])
+print(R.sroots)
+R = vsearch_cpp.RootSysCpp(L.A.tolist(), roots)
+print(R.sroots)
 
 # # Initialize the bound C++ class
 # searcher = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 6.5)

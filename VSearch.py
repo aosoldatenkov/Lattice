@@ -6,8 +6,14 @@ from collections import deque, defaultdict
 import fp_search_cpp
 
 class RootSys:
+    """A class for working with Euclidean root systems"""
 
     def __init__(self, A: fl.fmpz_mat, roots: list[list[int]], base: list[int] = None, max_rank: int = -1, cache_size: int = 2 ** 16):
+        """A is the Gram matrix of a lattice
+        roots is a list of roots of the lattice.
+        It is assumed that the roots span a sign definite sublattice, so that the Weyl
+        group is finite. The parameter base (if given) is the vector in the positive
+        Weyl chamber."""
         self.A = A
         self.eye = fl.fmpz_mat([[int(i == j) for i in range(A.ncols())] for j in range(A.ncols())])
         self.max_rank = self.A.ncols() if max_rank == -1 else max_rank
@@ -19,6 +25,7 @@ class RootSys:
         self.cache_miss = 0
         
     def _simple_roots(self, roots, base = None):
+        """Finds the positive roots and the simple roots"""
         self.sroots = []
         self.pos_roots = []
         self.M = fl.fmpz_mat(self.A.ncols(), 1, [0] * self.A.ncols())
@@ -53,6 +60,8 @@ class RootSys:
         self.M = self.A * fl.fmpz_mat([r.tolist()[0] for r in self.pos_roots]).transpose()
 
     def weyl_group(self):
+        """Computes the Weyl group. Its elements are indexed
+        by the Weyl chambers"""
         chambers = {self.chamber(self.base): self.eye}
         new = deque([self.base])
         while len(new) > 0:
@@ -83,6 +92,9 @@ class RootSys:
         #return tuple(sign((v * self.A * r.transpose())[0, 0]) for r in self.pos_roots)
     
     def find_reflection(self, v):
+        """Returns the matrix of an element of the Weyl group
+        that sends the chamber containing v to the positive
+        chamber defined by self.base"""
         c = self.closed_chamber(v)
         if all(x >= 0 for x in c):
             return self.eye
@@ -116,8 +128,17 @@ class RootSys:
     
 
 class VSearch:
+    """A class implementing the core of Vinberg's algoritm
+    for constructing the collection of simple roots of a Lorentzian
+    lattice"""
 
     def __init__(self, A: fl.fmpz_mat, exp: int, h_batch: int = 1, fps_batch: int = 10 ** 3):
+        """A is the Garam matrix of a lattice. It has to be of signature (1, n) and
+        has to satisfy the following condition: the sublattice spanned by the last
+        n vectors of the standard basis is negative-definite. The first basis vector
+        is used as the main axis that determines the height of the roots.
+        exp is the exponent of the lattice
+        The class uses Fincke-Pohst algorithm for the search of roots of a fixed height"""
         self.A = A
         self.exp = exp
         self.C = fl.fmpz_mat([v[1:] for v in A.tolist()[1:]])
@@ -133,6 +154,10 @@ class VSearch:
             self.FPS.append(self._init_fps())
 
     def _init_chamber(self):
+        """Determines the set of walls passing through the base point
+        in the hyperbolic space. This is the same as the set of simple
+        roots of the root system in the orthogonal complement of the
+        base point"""
         self.b = fl.fmpz_mat(1, self.rank - 1, self.A.tolist()[0][1:]) * self.C.inv()
         self.s = self.A[0, 0] - (self.b * self.C * self.b.transpose())[0, 0]
         if self.s <= 0:
@@ -161,6 +186,9 @@ class VSearch:
         return a % sq == 0
 
     def update_walls(self):
+        """Updates the active collection of walls, going through
+        the roots ordered by their distance from the base point.
+        This is the main step of Vinberg's algorithm"""
         new_walls = defaultdict(list)
         wall_list = self.R.sroots.copy()
         distances = sorted(list(self.roots.keys()))
