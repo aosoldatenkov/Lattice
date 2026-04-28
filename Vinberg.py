@@ -11,7 +11,7 @@ import fp_search_cpp
 
 class Vinberg:
 
-    def __init__(self, L: Lattice):
+    def __init__(self, L: Lattice, h_batch: int = 3, fps_batch: int = 10 ** 3, use_reflections: bool = True):
         # The lattice L should be of signature (1, n)
         if L.signature[0] != 1:
             raise ValueError("The lattice should be of signature (1, n)")
@@ -27,24 +27,24 @@ class Vinberg:
                 if L.square(u) > 0:
                     self.base = u
                     break
+        self.h_batch = h_batch
+        self.fps_batch = fps_batch
+        self.use_reflections = use_reflections
         self._init_basis()
 
     def _init_basis(self):
-        rank = self.L.rank
         axis, self.d = self.L.dual_vec(self.base)
-        if self.L.product(self.base, axis) != self.d:
-            raise ValueError("Error computing the dual vector")
         compl = self.L.complement([self.base])
         self.basis = [axis] + compl
-        self.M = Lattice(rank, self.L.batch_prod(self.basis, self.basis))
-        self.VS = VSearch(self.M.A, self.M.exp, h_batch=5)
+        self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
+        self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def print_info(self):
         print(f"Using {self.base} as the base point")
         print(f"Using the basis {self.basis}")
         print("The Gram matrix in this basis:")
         print(self.M.A)
-        print(f"Root system at the base point: f{len(self.VS.R.pos_roots)} positive roots")
+        print(f"Root system at the base point: {len(self.VS.R.pos_roots)} positive roots")
         B = fl.fmpz_mat(self.basis)
         print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
@@ -52,7 +52,7 @@ class Vinberg:
         count = 0
         while True:
             count += 1
-            self.VS.run(root_batch=root_batch, use_reflections=False)
+            self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
             walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
             walls = [[int(x) for x in w.tolist()[0]] for w in walls]
             print(f"Iteration {count}; {len(walls)} walls", end='\r')
@@ -61,8 +61,10 @@ class Vinberg:
                 squares = [(fl.fmpq_mat(1, self.L.rank, ray) * self.VS.A * fl.fmpq_mat(self.L.rank, 1, ray))[0, 0] for ray in rays]
                 if all(x >= 0 for x in squares):
                     print("\nThe fundamental domain has finite volume")
-                    print(walls)
-                    break
+                    B = fl.fmpz_mat(self.basis)
+                    W = fl.fmpz_mat(walls)
+                    return (W * B).tolist()
+                    
 
 
 class VinbergOld:
@@ -140,7 +142,7 @@ class VinbergOld:
         self.walls = new_walls
         self.roots = new_walls.copy()
 
-    def run(self, max_height: int, root_batch = 10000, height_batch = 3):
+    def run(self, max_height: int, root_batch = 10000, height_batch = 5):
         count_v = count_r = 0
         A = np.array(self.C.A.tolist(), dtype = float)
         walls = []
@@ -171,7 +173,7 @@ class VinbergOld:
                     count_r += 1
                     print(f"Height {h}, {count_v} vectors, {count_r} roots, {len(walls)} walls", end = "\r")
                     prod = h * self.d
-                    self.roots[fl.fmpq(prod ** 2, abs(sq))].append(v)
+                    self.roots[fl.fmpq(v[0] ** 2, abs(sq))].append(v)
                     if count_r % root_batch != 0:
                         continue
                     self.update_walls()

@@ -20,6 +20,8 @@ class RootSys:
         
     def _simple_roots(self, roots, base = None):
         self.sroots = []
+        self.pos_roots = []
+        self.M = fl.fmpz_mat(self.A.ncols(), 1, [0] * self.A.ncols())
         if len(roots) == 0:
             return
         if base and any((base * self.A * r.transpose())[0, 0] == 0 for r in roots):
@@ -82,18 +84,22 @@ class RootSys:
     
     def find_reflection(self, v):
         c = self.closed_chamber(v)
+        if all(x >= 0 for x in c):
+            return self.eye
         if c in self.cache_c:
             self.cache_hit += 1
             return self.cache_r[self.cache_c.index(c)]
         r = self.eye
+        c0 = c
         while any(x < 0 for x in c):
             height = sum(1 for j in range(len(self.pos_roots)) if c[j] < 0)
             for i in [j for j in range(len(self.pos_roots)) if c[j] < 0]:
                 new_c = self.closed_chamber(v * self.reflection(self.pos_roots[i]))
                 if new_c in self.cache_c:
+                    cached_r = self.cache_r[self.cache_c.index(new_c)]
                     self.cache_hit += 1
-                    self.cache_c.append(c)
-                    self.cache_r.append(r * self.reflection(self.pos_roots[i]) * self.cache_r[self.cache_c.index(new_c)])
+                    self.cache_c.append(c0)
+                    self.cache_r.append(r * self.reflection(self.pos_roots[i]) * cached_r)
                     return self.cache_r[-1]
                 else:
                     self.cache_miss += 1
@@ -104,14 +110,14 @@ class RootSys:
                     v = v * self.reflection(self.pos_roots[i])
                     break
         self.cache_miss += 1
-        self.cache_c.append(c)
+        self.cache_c.append(c0)
         self.cache_r.append(r)
         return r
     
 
 class VSearch:
 
-    def __init__(self, A: fl.fmpz_mat, exp: int, h_batch: int = 1):
+    def __init__(self, A: fl.fmpz_mat, exp: int, h_batch: int = 1, fps_batch: int = 10 ** 3):
         self.A = A
         self.exp = exp
         self.C = fl.fmpz_mat([v[1:] for v in A.tolist()[1:]])
@@ -121,6 +127,7 @@ class VSearch:
         self._init_chamber()
         self.h = 0
         self.h_batch = h_batch
+        self.fps_batch = fps_batch
         self.FPS = []
         for _ in range(h_batch):
             self.FPS.append(self._init_fps())
@@ -181,16 +188,15 @@ class VSearch:
         for i in range(self.h_batch):
             if self.FPS[i][1].exhausted():
                 self.FPS[i] = self._init_fps()
-            vv = self.FPS[i][1].batch_search(10 ** 3)
+            vv = self.FPS[i][1].batch_search(self.fps_batch)
             vecs.extend([fl.fmpz_mat(1, self.rank, [self.FPS[i][0]] + v) for v in vv])
         return vecs
 
     def run(self, root_batch = 10000, use_reflections = True):
-        count_v = count_r = 0
+        count_r = 0
         while True:
             vecs = self._run_fps()
             for v in vecs:
-                count_v += 1
                 sq = (v * self.A * v.transpose())[0, 0]
                 if not self._is_root(v) or sq > 0:
                     continue
