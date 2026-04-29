@@ -36,29 +36,30 @@ class Vinberg:
         axis, self.d = self.L.dual_vec(self.base)
         compl = self.L.complement([self.base])
         self.basis = [axis] + compl
+        B, _ = fl.fmpz_mat(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
-        #self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), self.M.exp, self.h_batch)
-        self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
+        self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (fl.fmpz_mat(1, self.L.rank, self.base) * B).tolist()[0], self.M.exp, self.h_batch)
+        #self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def print_info(self):
         print(f"Using {self.base} as the base point")
         print(f"Using the basis {self.basis}")
         print("The Gram matrix in this basis:")
         print(self.M.A)
-        print(f"Root system at the base point: {len(self.VS.R.pos_roots)} positive roots")
-        B = fl.fmpz_mat(self.basis)
-        print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
+        # print(f"Root system at the base point: {len(self.VS.R.pos_roots)} positive roots")
+        # B = fl.fmpz_mat(self.basis)
+        # print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
     def run(self, root_batch = 1000):
         count = 0
         while True:
             count += 1
-            # self.VS.run(root_batch=root_batch, use_reflections=False)
-            # self.VS.update_walls()
-            # walls = self.VS.get_walls()
-            self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
-            walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
-            walls = [[int(x) for x in w.tolist()[0]] for w in walls]
+            self.VS.run(root_batch=root_batch, use_reflections=False)
+            self.VS.update_walls()
+            walls = self.VS.get_walls()
+            # self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
+            # walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
+            # walls = [[int(x) for x in w.tolist()[0]] for w in walls]
             print(f"Iteration {count}; {len(walls)} walls", end='\r')
             if len(walls) == 0:
                 continue

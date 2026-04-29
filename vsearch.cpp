@@ -174,6 +174,9 @@ public:
             }
             M = A * pos_roots_mat.transpose();
         }
+        else {
+            M = MatrixXi64::Zero(rank, 1); // No positive roots, zero matrix
+        }
     }
 
     MatrixXi64 reflection(const RowVectorXi64& r) const {
@@ -266,42 +269,41 @@ class VSearchCpp {
 private:
     MatrixXi64 A;
     MatrixXi64 C_int;
+    RowVectorXi64 base;
     Eigen::MatrixXd C_double;
-    Eigen::RowVectorXd b;
     int rank;
     int exp;
-    double s;
+    mpq_class s;
     int num_threads;
     
     std::shared_ptr<RootSysCpp> R;
     std::map<Rational, std::vector<RowVectorXi64>> roots;
     std::map<Rational, std::vector<RowVectorXi64>> walls;
     
-    int h_counter;
+    mpz_class h_counter;
     std::vector<std::pair<mpz_class, FPSearch>> fps_workers;
     std::pair<mpz_class, FPSearch> init_fps() {
         h_counter += 1;
-        Eigen::VectorXd b_h = h_counter * b.transpose();
-        double bound = s * h_counter * h_counter;
-        double lbound = 0.5 + bound;
-        double ubound = 2.0 * exp + 0.5 + bound;
+        Eigen::VectorXd b_h(rank - 1);
+        for (int i = 0; i < rank - 1; ++i) b_h(i) = mpq_class(-base(0, i + 1) * h_counter, base(0, 0)).get_d();
+        mpq_class bound = s * h_counter * h_counter;
+        double lbound = 0.5 + bound.get_d();
+        double ubound = 2.0 * exp + 0.5 + bound.get_d();
         FPSearch fps(-C_double, b_h, lbound, ubound);
         return std::pair<mpz_class, FPSearch>(h_counter, std::move(fps));
     }
 
 public:
-    VSearchCpp(MatrixXi64 A_in, int exp_in, int num_threads_in) : A(std::move(A_in)), rank(A.rows()), exp(exp_in), num_threads(num_threads_in), h_counter(0) {
+    VSearchCpp(MatrixXi64 A_in, RowVectorXi64 base_in, int exp_in, int num_threads_in) :
+                A(std::move(A_in)), base(std::move(base_in)), rank(A.rows()), exp(exp_in), num_threads(num_threads_in), h_counter(0) {
         if (num_threads <= 0) num_threads = std::thread::hardware_concurrency();
 
         C_int = A.block(1, 1, rank - 1, rank - 1);
         C_double = C_int.unaryExpr([](const mpz_class& x) { return x.get_d(); });
         
-        Eigen::RowVectorXd A_row0_double = A.block(0, 1, 1, rank - 1).unaryExpr([](const mpz_class& x) { return x.get_d(); });
-        b = A_row0_double * C_double.inverse();
-        s = A(0, 0).get_d() - (b * C_double * b.transpose())(0, 0);
+        RowVectorXi64 A_row0 = A.block(0, 0, 1, rank);
+        s = mpq_class((A_row0 * base.transpose())(0, 0), base(0, 0));
         
-        if (s <= 0) throw std::runtime_error("Error initializing basis: s is non-positive");
-
         // Init Chamber (height 0)
         std::vector<RowVectorXi64> initial_roots;
         FPSearch fps(-C_double, Eigen::VectorXd::Zero(rank - 1), 0.0, 2.0 * exp + 0.5);
@@ -353,6 +355,11 @@ public:
                             // find_reflection modifies cache, needs a lock or local isolation.
                             // To maximize speed, each thread computes reflection on the fly
                             v = v * R->find_reflection(v); 
+                        } else {
+                            // std::vector<int> c = R->closed_chamber(v);
+                            // bool all_pos = true;
+                            // for (int x : c) if (x < 0) { all_pos = false; break; }
+                            // if (!all_pos) continue;
                         }
                         
                         local_roots.push_back(v);
@@ -484,9 +491,9 @@ PYBIND11_MODULE(vsearch_cpp, m) {
 
     // --- Expose VSearchCpp ---
     py::class_<VSearchCpp>(m, "VSearchCpp")
-        .def(py::init([](const std::vector<std::vector<mpz_class>>& A_in, int exp, int num_threads) {
-            return std::make_unique<VSearchCpp>(to_matrix(A_in), exp, num_threads);
-        }), py::arg("A"), py::arg("exp"), py::arg("num_threads") = 1)
+        .def(py::init([](const std::vector<std::vector<mpz_class>>& A_in, const std::vector<mpz_class>& base_in, const int exp, int num_threads) {
+            return std::make_unique<VSearchCpp>(to_matrix(A_in), to_row_vector(base_in), exp, num_threads);
+        }), py::arg("A"), py::arg("base"), py::arg("exp"), py::arg("num_threads") = 1)
         
         .def("run", &VSearchCpp::run, py::arg("root_batch") = 10000, py::arg("use_reflections") = true)
         .def("update_walls", &VSearchCpp::update_walls)
