@@ -79,124 +79,37 @@ def CheckAllcock():
             print(V.run(10 ** 100, root_batch=100))
 
 
-# with open('in', "r") as f:
-#     lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-#     for j, l in enumerate(lattices):
-#         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-#         L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
-#         print(L.info())
-#         print(L.A)
-#         V = Vinberg(L)
-#         V.run()
-#         print(f"Cache hit/miss: {V.VS.R.cache_hit}/{V.VS.R.cache_miss}")
-
-L = E_lat(8)
-print(L.info())
-print(L.A)
-FPS = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 2.5)
-vecs = FPS.batch_search(10 ** 5)
-roots = []
-for v in vecs:
-    if L.is_root(v):
-        roots.append(v)
-print(f"Found {len(roots)} roots")
-R = RootSys(L.A, roots, base = [i ** 2 + 11 for i in range(L.rank)])
-print(R.sroots)
-R = vsearch_cpp.RootSysCpp(L.A.tolist(), roots)
-print(R.sroots)
-
-# # Initialize the bound C++ class
-# searcher = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 6.5)
-
-# # Pull results
-# batch_size = 20000000
-
-# while True:
-#     results = searcher.batch_search(batch_size)
-#     if not results:
-#         break
-#     for vec in results:
-#         if L.square(vec) == 6:
-#             count += 1
-#         print(f"{count}", end='\r')
-# print(count)
-
-
-# L = E_lat(8)
+with open('in', "r") as f:
+    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    for j, l in enumerate(lattices[2034:2035]):
+        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+        print(L.info())
+        print(L.A)
+        V = Vinberg(L, h_batch=5)
+        V.print_info()
+        print(V.run(root_batch=10000))
+        
+# L = I_lat(1, 14)
 # print(L.info())
 # print(L.A)
-# count = 0
-# FPS = FPSearch(L.A.tolist(), [0] * 8, 0, 2.5)
-# vecs = FPS.batch_search(1000)
-# for v in vecs:
-#     if L.square(v) == 2:
-#         count += 1
-# print(count)
 
+# A_np = np.array(L.A.tolist(), dtype=np.int64)
+# engine = vsearch_cpp.VSearchCpp(A_np, 1, 1)
 
-# A = -np.array(L.batch_prod(basis, basis), dtype=float)
 # count = 0
-# roots = set()
-# for v in fincke_pohst_search(A, np.zeros(21), 2.5, 4.5):
-#     if M.is_root(v):
-#         roots.add(tuple(v))
-#     count += 1
-#     print(f"{count} vectors, {len(roots)} roots", end="\r")
-#     if count >= 100000:
-#         break
-# print()
-
-# A = -np.array(L.batch_prod(basis[:2], basis[:2]), dtype=float)
-# count = 0
-# xx = []
-# yy = []
-# cc = []
-# roots = set()
-# level = 1
-# step = 10
 # while True:
-#     for v in fincke_pohst_search(A, np.array([1000, 1000], dtype=float), step * (level - 1) ** 2 - 0.5, step * level ** 2 + 0.5):
-#         count += 1
-#         print(f"{count} vectors, level {level}", end="\r")
-#         xx.append(v[0])
-#         yy.append(v[1])
-#         cc.append((level ** 3) % 20)
-#     level += 1
-#     if count >= 100000:
-#         break
-
-# x = np.array(xx)
-# y = np.array(yy)
-# fig, ax = plt.subplots(1)
-# ax.scatter(x, y, s=1, c=cc)
-# plt.show()
-
-# count = 0
-# mindd = []
-# maxdd = []
-# maxd = 0
-# mind = 10 ** 100
-# bl = BatchGenerator(M.rank, d = 10, max_size = 10 ** 8)
-# for v in bl.vectors():
-#     # prod = L.product(base, v)
-#     # if prod < 0:
-#     #     continue
 #     count += 1
-#     print(f"{count} roots", end='\r')
-#     d = float(abs(M.square(v)))
-#     mind = min(mind, d)
-#     maxd = max(maxd, d)
-#     if count % 10 ** 6 == 0:
-#         mindd.append(mind)
-#         maxdd.append(maxd)
-#         mind = 10 ** 100
-#         maxd = 0
-#     if count >= 10 ** 8:
-#         break
-
-# t = np.arange(len(maxdd))
-# fig, ax = plt.subplots(1)
-# ax.fill_between(t, np.array(maxdd), np.array(mindd), facecolor='C0', alpha=0.4)
-# plt.show()
-# Vinberg(L, root_batch=100000)
-  
+#     engine.run(root_batch=10000000, use_reflections=False)
+#     engine.update_walls()
+#     walls = engine.get_walls()
+#     print(f"Iteration {count}; {len(walls)} walls", end='\r')
+#     rays, lines = get_extremal_rays(walls, L.A)
+#     if len(lines) == 0:
+#         squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
+#         if all(x >= 0 for x in squares):
+#             print("\nThe fundamental domain has finite volume")
+#             print("Walls:")
+#             for w in walls:
+#                 print(w)
+#             break

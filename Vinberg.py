@@ -7,7 +7,7 @@ from IntVectors import *
 from FPSearch import *
 from VSearch import *
 import fp_search_cpp
-
+import vsearch_cpp
 
 class Vinberg:
 
@@ -37,6 +37,7 @@ class Vinberg:
         compl = self.L.complement([self.base])
         self.basis = [axis] + compl
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
+        #self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), self.M.exp, self.h_batch)
         self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def print_info(self):
@@ -52,13 +53,18 @@ class Vinberg:
         count = 0
         while True:
             count += 1
+            # self.VS.run(root_batch=root_batch, use_reflections=False)
+            # self.VS.update_walls()
+            # walls = self.VS.get_walls()
             self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
             walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
             walls = [[int(x) for x in w.tolist()[0]] for w in walls]
             print(f"Iteration {count}; {len(walls)} walls", end='\r')
-            rays, lines = get_extremal_rays(walls, self.VS.A)
+            if len(walls) == 0:
+                continue
+            rays, lines = get_extremal_rays(walls, self.M.A)
             if len(lines) == 0:
-                squares = [(fl.fmpq_mat(1, self.L.rank, ray) * self.VS.A * fl.fmpq_mat(self.L.rank, 1, ray))[0, 0] for ray in rays]
+                squares = [(fl.fmpq_mat(1, self.L.rank, ray) * self.M.A * fl.fmpq_mat(self.L.rank, 1, ray))[0, 0] for ray in rays]
                 if all(x >= 0 for x in squares):
                     print("\nThe fundamental domain has finite volume")
                     B = fl.fmpz_mat(self.basis)
