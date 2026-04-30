@@ -88,7 +88,9 @@ with open('in', "r") as f:
         print(L.A)
         V = Vinberg(L, h_batch=100)
         V.print_info()
-        print(V.run(root_batch=1000000))
+        walls = V.run(root_batch=1000000)
+        for w in walls:
+            print(w, L.square(w))
         
 # L = I_lat(1, 14)
 # print(L.info())

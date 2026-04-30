@@ -27,7 +27,10 @@ class Vinberg:
         base = self.L.complement(compl)
         if len(base) == 1 and self.L.square(base[0]) > 0:
             self.base = base[0]
-            axis = [1 if self.base[0] > 0 else -1] + [0] * (self.L.rank - 1)
+            axis = [1] + [0] * (self.L.rank - 1)
+            if self.L.product(self.base, axis) <= 0:
+                print(self.L.product(self.base, axis))
+                axis[0] = -1
         else:
             # If the first vector is not positive, change the basis
             for u in int_seq(self.L.rank, nonzero=True):
@@ -45,13 +48,13 @@ class Vinberg:
         #     if self.L.square(u) > 0:
         #         self.base = u
         #         break
-        axis, _ = self.L.dual_vec(self.base)
-        compl = self.L.complement([self.base])
+        # axis, _ = self.L.dual_vec(self.base)
+        # compl = self.L.complement([self.base])
         self.basis = [axis] + compl
         B, _ = fl.fmpz_mat(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
         self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (fl.fmpz_mat(1, self.L.rank, self.base) * B).tolist()[0], self.M.exp, self.h_batch)
-        #self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
+        # self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def print_info(self):
         print(f"Using {self.base} as the base point")
@@ -62,10 +65,16 @@ class Vinberg:
         # B = fl.fmpz_mat(self.basis)
         # print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
-    def run(self, root_batch = 1000):
+    def run(self, root_batch = 1000, max_iterations = 5000):
         count = 0
         while True:
             count += 1
+            if count > max_iterations:
+                print("\nReached the maximum number of iterations")
+                walls = self.VS.get_walls()
+                B = fl.fmpz_mat(self.basis)
+                W = fl.fmpz_mat(walls)
+                return (W * B).tolist()
             self.VS.run(root_batch=root_batch, use_reflections=False)
             self.VS.update_walls()
             walls = self.VS.get_walls()
