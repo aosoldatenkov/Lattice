@@ -79,23 +79,23 @@ def CheckAllcock():
             print(V.run(10 ** 100, root_batch=100))
 
 
-# with open('in', "r") as f:
-#     lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-#     for j, l in enumerate(lattices[2800:]):
-#         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-#         L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
-#         print(L.info())
-#         print(L.A)
-#         V = Vinberg(L, h_batch=100)
-#         V.print_info()
-#         print(V.run(root_batch=1000000))
+with open('in', "r") as f:
+    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    for j, l in enumerate(lattices[2802:2803]):
+        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+        print(L.info())
+        print(L.A)
+        V = Vinberg(L, h_batch=100)
+        V.print_info()
+        print(V.run(root_batch=1000000))
         
-L = I_lat(1, 14)
-print(L.info())
-print(L.A)
-V = Vinberg(L, h_batch=5)
-V.print_info()
-print(V.run(root_batch=100000))
+# L = I_lat(1, 14)
+# print(L.info())
+# print(L.A)
+# V = Vinberg(L, h_batch=10)
+# V.print_info()
+# print(V.run(root_batch=1))
 
 # A_np = np.array(L.A.tolist(), dtype=np.int64)
 # engine = vsearch_cpp.VSearchCpp(A_np, 1, 1)

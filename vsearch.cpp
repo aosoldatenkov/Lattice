@@ -199,7 +199,7 @@ public:
         for (int x : c) if (x < 0) { all_pos = false; break; }
         if (all_pos) return eye;
 
-        if (cache.count(c)) return cache[c];
+        // if (cache.count(c)) return cache[c];
 
         MatrixXi64 r_mat = eye;
         std::vector<int> c0 = c;
@@ -216,11 +216,11 @@ public:
                     RowVectorXi64 next_v = v * ref_i;
                     std::vector<int> new_c = closed_chamber(next_v);
 
-                    if (cache.count(new_c)) {
-                        MatrixXi64 final_r = r_mat * ref_i * cache[new_c];
-                        cache[c0] = final_r;
-                        return final_r;
-                    }
+                    // if (cache.count(new_c)) {
+                    //     MatrixXi64 final_r = r_mat * ref_i * cache[new_c];
+                    //     cache[c0] = final_r;
+                    //     return final_r;
+                    // }
 
                     int new_height = 0;
                     for (int x : new_c) if (x < 0) new_height++;
@@ -236,7 +236,7 @@ public:
             }
             if (!moved) break;
         }
-        cache[c0] = r_mat;
+        // cache[c0] = r_mat;
         return r_mat;
     }
 };
@@ -254,7 +254,7 @@ mpz_class mpz_gcd(mpz_class a, mpz_class b) {
 bool is_root_core(const MatrixXi64& A, const RowVectorXi64& r) {
     RowVectorXi64 prod = r * A;
     mpz_class sq = (prod * r.transpose())(0, 0);
-    if (sq == 0) return false;
+    if (sq >= 0) return false;
     
     mpz_class current_gcd = abs(prod(0, 0));
     for (int i = 1; i < prod.cols(); ++i) {
@@ -303,6 +303,8 @@ public:
         
         RowVectorXi64 A_row0 = A.block(0, 0, 1, rank);
         s = mpq_class((A_row0 * base.transpose())(0, 0), base(0, 0));
+
+        if (s <= 0) throw std::runtime_error("Error initializing basis: s is non-positive");
         
         // Init Chamber (height 0)
         std::vector<RowVectorXi64> initial_roots;
@@ -341,25 +343,28 @@ public:
                 while (valid_roots_found.load() < root_batch) {
                     
                     if (fps_worker->second.exhausted()) break;
-                    auto vecs = fps_worker->second.batch_search(1000);
+                    auto vecs = fps_worker->second.batch_search(10000);
 
                     for (const auto& u : vecs) {
                         RowVectorXi64 v = RowVectorXi64::Zero(rank);
                         v(0, 0) = fps_worker->first;
                         for (size_t j = 0; j < u.size(); ++j) v(0, j + 1) = u[j];
 
-                        mpz_class sq = (v * A * v.transpose())(0, 0);
-                        if (sq > 0 || !is_root_core(A, v)) continue;
+                        if (!is_root_core(A, v)) continue;
 
                         if (use_reflections) {
                             // find_reflection modifies cache, needs a lock or local isolation.
                             // To maximize speed, each thread computes reflection on the fly
                             v = v * R->find_reflection(v); 
                         } else {
-                            // std::vector<int> c = R->closed_chamber(v);
-                            // bool all_pos = true;
-                            // for (int x : c) if (x < 0) { all_pos = false; break; }
-                            // if (!all_pos) continue;
+                            bool all_pos = true;
+                            for (const auto& w : R->sroots) {
+                                if ((w * A * v.transpose())(0, 0) < 0) {
+                                    all_pos = false;
+                                    break;
+                                }
+                            }
+                            if (!all_pos) continue;
                         }
                         
                         local_roots.push_back(v);

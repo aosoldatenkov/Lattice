@@ -16,24 +16,36 @@ class Vinberg:
         if L.signature[0] != 1:
             raise ValueError("The lattice should be of signature (1, n)")
         self.L = L
-        # Check if the given basis is suitable
-        if L.A[0, 0] > 0:
-            self.base = [1] + [0] * (L.rank - 1)
-        else:
-            # If the first vector is not positive, change the basis
-            for u in int_seq(L.rank, nonzero=True):
-                if math.gcd(*u) != 1:
-                    continue
-                if L.square(u) > 0:
-                    self.base = u
-                    break
         self.h_batch = h_batch
         self.fps_batch = fps_batch
         self.use_reflections = use_reflections
         self._init_basis()
 
     def _init_basis(self):
-        axis, self.d = self.L.dual_vec(self.base)
+        # Check if the given basis is suitable
+        compl = [[int(i == j) for j in range(self.L.rank)] for i in range(1, self.L.rank)]
+        base = self.L.complement(compl)
+        if len(base) == 1 and self.L.square(base[0]) > 0:
+            self.base = base[0]
+            axis = [1 if self.base[0] > 0 else -1] + [0] * (self.L.rank - 1)
+        else:
+            # If the first vector is not positive, change the basis
+            for u in int_seq(self.L.rank, nonzero=True):
+                if math.gcd(*u) != 1:
+                    continue
+                if self.L.square(u) > 0:
+                    self.base = u
+                    break
+            axis, _ = self.L.dual_vec(self.base)
+            compl = self.L.complement([self.base])
+        
+        # for u in int_seq(self.L.rank, nonzero=True):
+        #     if math.gcd(*u) != 1:
+        #         continue
+        #     if self.L.square(u) > 0:
+        #         self.base = u
+        #         break
+        axis, _ = self.L.dual_vec(self.base)
         compl = self.L.complement([self.base])
         self.basis = [axis] + compl
         B, _ = fl.fmpz_mat(self.basis).inv().numer_denom()
