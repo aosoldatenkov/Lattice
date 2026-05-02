@@ -5,7 +5,7 @@
 #include <vector>
 #include <numeric>
 #include <cmath>
-#include <unordered_map>
+#include <set>
 #include <map>
 #include <thread>
 #include <future>
@@ -13,6 +13,7 @@
 #include <mutex>
 #include <cstdlib>
 #include <gmpxx.h>
+#include <iostream>
 #include "fp_search.cpp"
 
 namespace py = pybind11;
@@ -86,15 +87,17 @@ struct Rational {
     bool operator==(const Rational& o) const {
         return p * o.q == o.p * q;
     }
+    double to_double() const {
+        mpq_class fraction(p, q);
+        fraction.canonicalize();
+        return fraction.get_d();
+    }
 };
 
 // --- 2. RootSys & Integer Math ---
-struct ChamberHash {
-    size_t operator()(const std::vector<int>& v) const {
-        size_t seed = v.size();
-        for(auto& i : v) seed ^= static_cast<size_t>(i) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        return seed;
-    }
+struct SignedPermutation {
+    std::set<std::pair<int, int>> minus;
+    std::set<std::pair<int, int>> plus;
 };
 
 class RootSysCpp {
@@ -104,8 +107,43 @@ private:
     MatrixXi64 M;
     RowVectorXi64 base;
     std::vector<RowVectorXi64> pos_roots;
-    std::unordered_map<std::vector<int>, MatrixXi64, ChamberHash> cache;
+    std::vector<MatrixXi64> refl;
+    std::vector<SignedPermutation> perm;
 
+    void init_reflections() {
+        std::vector<size_t> active;
+        for (size_t i = 0; i < pos_roots.size(); ++i) {
+            MatrixXi64 r = reflection(pos_roots[i]);
+            refl.push_back(r);
+            active.clear();
+            RowVectorXi64 prod = pos_roots[i] * A;
+            for (size_t j = 0; j < pos_roots.size(); ++j) {
+                if ((prod * pos_roots[j].transpose())(0, 0) != 0) active.push_back(j);
+            }
+            SignedPermutation p;
+            for (size_t j : active) {
+                RowVectorXi64 u = pos_roots[j] * r;
+                bool found = false;
+                for (size_t k = 0; k < pos_roots.size(); ++k) {
+                    if (u == pos_roots[k]) {
+                        p.plus.insert(std::pair<int, int>(j, k));
+                        // std::cout << i << ": " << j << "->" << k << std::endl;
+                        found = true;
+                        break;
+                    }
+                    if (u == -pos_roots[k]) {
+                        p.minus.insert(std::pair<int, int>(j, k));
+                        // std::cout << i << ": " << j << "-> -" << k << std::endl;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) throw std::runtime_error("Broken root system");
+            }
+            perm.push_back(p);
+        }
+    }
+    
 public:
     std::vector<RowVectorXi64> sroots;
     
@@ -177,6 +215,8 @@ public:
         else {
             M = MatrixXi64::Zero(rank, 1); // No positive roots, zero matrix
         }
+
+        init_reflections();
     }
 
     MatrixXi64 reflection(const RowVectorXi64& r) const {
@@ -184,7 +224,7 @@ public:
         return eye - ((2 * A * r.transpose() * r) / norm); 
     }
 
-    std::vector<int> closed_chamber(const RowVectorXi64& v) const {
+    std::vector<int> closed_chamber(RowVectorXi64 v) {
         RowVectorXi64 prod = v * M;
         std::vector<int> signs(prod.cols());
         for (int i = 0; i < prod.cols(); ++i) {
@@ -193,53 +233,40 @@ public:
         return signs;
     }
 
-    MatrixXi64 find_reflection(RowVectorXi64 v) {
+    RowVectorXi64 reflect(RowVectorXi64 v) {
         std::vector<int> c = closed_chamber(v);
         bool all_pos = true;
         for (int x : c) if (x < 0) { all_pos = false; break; }
-        if (all_pos) return eye;
-
-        // if (cache.count(c)) return cache[c];
-
-        MatrixXi64 r_mat = eye;
-        std::vector<int> c0 = c;
-
-        while (true) {
-            int height = 0;
-            for (int x : c) if (x < 0) height++;
-            if (height == 0) break;
-
-            bool moved = false;
+        RowVectorXi64 new_v = v;
+        while (!all_pos) {
+            std::vector<int> new_c = c;
             for (size_t i = 0; i < pos_roots.size(); ++i) {
-                if (c[i] < 0) {
-                    MatrixXi64 ref_i = reflection(pos_roots[i]);
-                    RowVectorXi64 next_v = v * ref_i;
-                    std::vector<int> new_c = closed_chamber(next_v);
-
-                    // if (cache.count(new_c)) {
-                    //     MatrixXi64 final_r = r_mat * ref_i * cache[new_c];
-                    //     cache[c0] = final_r;
-                    //     return final_r;
-                    // }
-
-                    int new_height = 0;
-                    for (int x : new_c) if (x < 0) new_height++;
-
-                    if (new_height < height) {
-                        c = new_c;
-                        r_mat = r_mat * ref_i;
-                        v = next_v;
-                        moved = true;
-                        break;
+                int count = 0;
+                for (auto p : perm[i].minus) {
+                    if (p.first == p.second) count += c[p.first];
+                    else count += c[p.first] + c[p.second];
+                }
+                if (count < 0) {
+                    for (auto p : perm[i].plus) {
+                        new_c[p.first] = c[p.second];
+                        new_c[p.second] = c[p.first];
                     }
+                    for (auto p : perm[i].minus) {
+                        new_c[p.first] = -c[p.second];
+                        new_c[p.second] = -c[p.first];
+                    }
+                    new_v = new_v * refl[i];
+                    break;
                 }
             }
-            if (!moved) break;
+            c = new_c;
+            all_pos = true;
+            for (int x : c) if (x < 0) { all_pos = false; break; }
         }
-        // cache[c0] = r_mat;
-        return r_mat;
+        return new_v;
     }
 };
+
 
 mpz_class mpz_gcd(mpz_class a, mpz_class b) {
     a = abs(a); b = abs(b);
@@ -285,10 +312,14 @@ private:
     std::pair<mpz_class, FPSearch> init_fps() {
         h_counter += 1;
         Eigen::VectorXd b_h(rank - 1);
-        for (int i = 0; i < rank - 1; ++i) b_h(i) = mpq_class(-base(0, i + 1) * h_counter, base(0, 0)).get_d();
+        for (int i = 0; i < rank - 1; ++i) {
+            mpq_class val = mpq_class(-base(0, i + 1) * h_counter, base(0, 0));
+            val.canonicalize();
+            b_h(i) = val.get_d();
+        }
         mpq_class bound = s * h_counter * h_counter;
-        double lbound = 0.5 + bound.get_d();
-        double ubound = 2.0 * exp + 0.5 + bound.get_d();
+        double lbound = bound.get_d();
+        double ubound = 2.1 * exp + bound.get_d();
         FPSearch fps(-C_double, b_h, lbound, ubound);
         return std::pair<mpz_class, FPSearch>(h_counter, std::move(fps));
     }
@@ -303,12 +334,16 @@ public:
         
         RowVectorXi64 A_row0 = A.block(0, 0, 1, rank);
         s = mpq_class((A_row0 * base.transpose())(0, 0), base(0, 0));
+        s.canonicalize();
 
-        if (s <= 0) throw std::runtime_error("Error initializing basis: s is non-positive");
+        if (s <= 0) {
+            std::cout << "s = " << s.get_d() << " prod = " << (A_row0 * base.transpose())(0, 0) << " base(0, 0) = " << base(0, 0) << std::endl;
+            throw std::runtime_error("Error initializing basis: s is non-positive");
+        }
         
         // Init Chamber (height 0)
         std::vector<RowVectorXi64> initial_roots;
-        FPSearch fps(-C_double, Eigen::VectorXd::Zero(rank - 1), 0.0, 2.0 * exp + 0.5);
+        FPSearch fps(-C_double, Eigen::VectorXd::Zero(rank - 1), 0.0, 2.1 * exp + 0.5);
         auto vecs = fps.search_all();
         
         for (const auto& u : vecs) {
@@ -353,9 +388,7 @@ public:
                         if (!is_root_core(A, v)) continue;
 
                         if (use_reflections) {
-                            // find_reflection modifies cache, needs a lock or local isolation.
-                            // To maximize speed, each thread computes reflection on the fly
-                            v = v * R->find_reflection(v); 
+                            v = R->reflect(v); 
                         } else {
                             bool all_pos = true;
                             for (const auto& w : R->sroots) {
@@ -391,7 +424,7 @@ public:
 
     void update_walls() {
         std::map<Rational, std::vector<RowVectorXi64>> new_walls;
-        std::vector<RowVectorXi64> wall_list = R->sroots;
+        std::vector<RowVectorXi64> wall_list; // = R->sroots;
 
         // roots map is implicitly ordered by Rational distance due to std::map
         for (const auto& pair : roots) {
@@ -480,8 +513,12 @@ PYBIND11_MODULE(vsearch_cpp, m) {
             return std::make_shared<RootSysCpp>(to_matrix(A_in), eigen_roots, to_row_vector(base_in));
         }), py::arg("A"), py::arg("roots"), py::arg("base") = std::vector<mpz_class>())
         
-        .def("find_reflection", [](RootSysCpp& self, const std::vector<mpz_class>& v) {
-            return to_std_matrix(self.find_reflection(to_row_vector(v)));
+        .def("reflect", [](RootSysCpp& self, const std::vector<mpz_class>& v) {
+            return to_std_vector(self.reflect(to_row_vector(v)));
+        }, py::arg("v"))
+
+        .def("closed_chamber", [](RootSysCpp& self, const std::vector<mpz_class>& v) {
+            return self.closed_chamber(to_row_vector(v));
         }, py::arg("v"))
         
         .def("reflection", [](RootSysCpp& self, const std::vector<mpz_class>& r) {

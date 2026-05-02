@@ -3,11 +3,11 @@
 import flint as fl
 import matplotlib.pyplot as plt
 import numpy as np
+import random as rnd
+import time
+import datetime
 from BinLattice import BinLattice, int_seq
-import math
-import sympy as sp
 from Lattice import *
-from collections import defaultdict
 from LatticeUtils import *
 from IntVectors import *
 from Vinberg import *
@@ -66,41 +66,63 @@ class DiscForm:
         return max_isospaces
 
 def CheckAllcock():
+    start = time.perf_counter()
     with open('in', "r") as f:
         lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-    for j, l in enumerate(lattices):
+        for j, l in enumerate(lattices):
             print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+            lstart = time.perf_counter()
             L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
             print(L.info())
             print(L.A)
-            #print(Vinberg2(L, root_batch=100))
-            V = Vinberg(L)
+            V = Vinberg(L, h_batch=100)
             V.print_info()
-            print(V.run(10 ** 100, root_batch=100))
+            walls = V.run(root_batch=1000000, use_reflections=True)
+            lend = time.perf_counter()
+            for w in walls:
+                print(w, L.square(w))
+            print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
+    end = time.perf_counter()
+    print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
 
+def TestReflections():
+    L = E_lat(8) + E_lat(8)
+    print(L.info())
+    print(L.A)
+    roots = []
+    fps = fp_search_cpp.FPSearch(np.array(L.A.tolist(), dtype=float), np.zeros(L.rank, dtype=float), 0, 2.5)
+    for v in fps.search_all():
+        if L.is_root(v):
+            roots.append(v)
+    print(len(roots))
+    R = vsearch_cpp.RootSysCpp(L.A.tolist(), roots)
+    print(R.sroots)
+    start = time.perf_counter()
+    count = 0
+    while True:
+        v = [rnd.randint(1, 10 ** 6) for _ in range(L.rank)]
+        # r = fl.fmpz_mat(R.find_reflection(v))
+        # vr = fl.fmpz_mat(1, L.rank, v) * r
+        # chamber = R.closed_chamber(vr.tolist()[0])
+        vr = R.reflect(v)
+        chamber = R.closed_chamber(vr)
+        if not all(x > 0 for x in chamber):
+            print("Error")
+            break
+        count += 1
+        print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-with open('in', "r") as f:
-    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-    for j, l in enumerate(lattices[2802:2803]):
-        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
-        print(L.info())
-        print(L.A)
-        V = Vinberg(L, h_batch=100)
-        V.print_info()
-        walls = V.run(root_batch=1000000)
-        for w in walls:
-            print(w, L.square(w))
-        
+CheckAllcock()
+
 # L = I_lat(1, 14)
 # print(L.info())
 # print(L.A)
 # V = Vinberg(L, h_batch=10)
 # V.print_info()
-# print(V.run(root_batch=1))
+# walls = V.run(root_batch=1, use_reflections=False)
+# for w in walls:
+#     print(w, L.square(w))
 
-# A_np = np.array(L.A.tolist(), dtype=np.int64)
-# engine = vsearch_cpp.VSearchCpp(A_np, 1, 1)
 
 # count = 0
 # while True:
