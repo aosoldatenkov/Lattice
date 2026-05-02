@@ -71,13 +71,25 @@ namespace Eigen {
 }
 
 // --- 3. Matrix Type Aliases ---
-using MatrixXi64 = Eigen::Matrix<mpz_class, Eigen::Dynamic, Eigen::Dynamic>;
-using RowVectorXi64 = Eigen::Matrix<mpz_class, 1, Eigen::Dynamic>;
+using int_class = long;
+// using int_class = mpz_class;
+using MatrixXi64 = Eigen::Matrix<int_class, Eigen::Dynamic, Eigen::Dynamic>;
+using RowVectorXi64 = Eigen::Matrix<int_class, 1, Eigen::Dynamic>;
+
+int int_class_to_int(const int_class& x) {
+    return static_cast<int>(x);
+    // return x.get_si();
+}
+
+double int_class_to_double(const int_class& x) {
+    return static_cast<double>(x);
+    // return x.get_d();
+}
 
 // --- 1. Rational Number Struct for exact sorting of distances ---
 struct Rational {
-    mpz_class p, q;
-    Rational(mpz_class num, mpz_class den) : p(num), q(den) {
+    int_class p, q;
+    Rational(int_class num, int_class den) : p(num), q(den) {
         if (q < 0) { p = -p; q = -q; }
     }
     bool operator<(const Rational& o) const {
@@ -161,7 +173,7 @@ public:
         // Ensure the base vector does not lie on any root hyperplane
         // (i.e., its inner product with every root must be non-zero)
         bool valid_base = false;
-        std::srand(A(0, 0).get_si()); // Seed with a value from A for reproducibility, can be any deterministic seed
+        std::srand(int_class_to_int(A(0, 0))); // Seed with a value from A for reproducibility, can be any deterministic seed
         while (!valid_base) {
             valid_base = true;
             for (const auto& r : roots) {
@@ -175,7 +187,7 @@ public:
 
         // 2. Filter positive roots based on the polarization vector
         for (const auto& r : roots) {
-            mpz_class dot = (base * A * r.transpose())(0, 0);
+            int_class dot = (base * A * r.transpose())(0, 0);
             if (dot > 0) {
                 pos_roots.push_back(r);
             }
@@ -189,7 +201,7 @@ public:
         // 4. Extract simple roots (sroots)
         sroots.clear();
         for (const auto& r : pos_roots) {
-            mpz_class sign = (r * A * r.transpose())(0, 0) > 0 ? 1 : -1;
+            int_class sign = (r * A * r.transpose())(0, 0) > 0 ? 1 : -1;
             bool is_simple = true;
             for (const auto& s : sroots) {
                 // A positive root is NOT simple if it has a positive inner product
@@ -220,7 +232,7 @@ public:
     }
 
     MatrixXi64 reflection(const RowVectorXi64& r) const {
-        mpz_class norm = (r * A * r.transpose())(0, 0);
+        int_class norm = (r * A * r.transpose())(0, 0);
         return eye - ((2 * A * r.transpose() * r) / norm); 
     }
 
@@ -268,10 +280,10 @@ public:
 };
 
 
-mpz_class mpz_gcd(mpz_class a, mpz_class b) {
+int_class mpz_gcd(int_class a, int_class b) {
     a = abs(a); b = abs(b);
     while (b != 0) {
-        mpz_class t = b;
+        int_class t = b;
         b = a % b;
         a = t;
     }
@@ -280,10 +292,10 @@ mpz_class mpz_gcd(mpz_class a, mpz_class b) {
 
 bool is_root_core(const MatrixXi64& A, const RowVectorXi64& r) {
     RowVectorXi64 prod = r * A;
-    mpz_class sq = (prod * r.transpose())(0, 0);
+    int_class sq = (prod * r.transpose())(0, 0);
     if (sq >= 0) return false;
     
-    mpz_class current_gcd = abs(prod(0, 0));
+    int_class current_gcd = abs(prod(0, 0));
     for (int i = 1; i < prod.cols(); ++i) {
         current_gcd = mpz_gcd(current_gcd, abs(prod(0, i)));
         if (current_gcd == 1) break;
@@ -307,9 +319,9 @@ private:
     std::map<Rational, std::vector<RowVectorXi64>> roots;
     std::map<Rational, std::vector<RowVectorXi64>> walls;
     
-    mpz_class h_counter;
-    std::vector<std::pair<mpz_class, FPSearch>> fps_workers;
-    std::pair<mpz_class, FPSearch> init_fps() {
+    int_class h_counter;
+    std::vector<std::pair<int_class, FPSearch>> fps_workers;
+    std::pair<int_class, FPSearch> init_fps() {
         h_counter += 1;
         Eigen::VectorXd b_h(rank - 1);
         for (int i = 0; i < rank - 1; ++i) {
@@ -321,7 +333,7 @@ private:
         double lbound = bound.get_d();
         double ubound = 2.1 * exp + bound.get_d();
         FPSearch fps(-C_double, b_h, lbound, ubound);
-        return std::pair<mpz_class, FPSearch>(h_counter, std::move(fps));
+        return std::pair<int_class, FPSearch>(h_counter, std::move(fps));
     }
 
 public:
@@ -330,7 +342,7 @@ public:
         if (num_threads <= 0) num_threads = std::thread::hardware_concurrency();
 
         C_int = A.block(1, 1, rank - 1, rank - 1);
-        C_double = C_int.unaryExpr([](const mpz_class& x) { return x.get_d(); });
+        C_double = C_int.unaryExpr([](const int_class& x) { return int_class_to_double(x); });
         
         RowVectorXi64 A_row0 = A.block(0, 0, 1, rank);
         s = mpq_class((A_row0 * base.transpose())(0, 0), base(0, 0));
@@ -371,7 +383,7 @@ public:
         py::gil_scoped_release release;
 
         for (int i = 0; i < num_threads; ++i) {
-            std::pair<mpz_class, FPSearch>* fps_worker = &fps_workers[i];
+            std::pair<int_class, FPSearch>* fps_worker = &fps_workers[i];
             futures.push_back(std::async(std::launch::async, [this, i, root_batch, use_reflections, &valid_roots_found, fps_worker]() {
                 std::vector<RowVectorXi64> local_roots;
                 
@@ -412,8 +424,8 @@ public:
         for (auto& fut : futures) {
             auto partial_roots = fut.get();
             for (const auto& v : partial_roots) {
-                mpz_class sq = abs((v * A * v.transpose())(0, 0));
-                mpz_class p = v(0, 0) * v(0, 0);
+                int_class sq = abs((v * A * v.transpose())(0, 0));
+                int_class p = v(0, 0) * v(0, 0);
                 Rational key(p, sq);
                 roots[key].push_back(v);
             }
@@ -450,16 +462,16 @@ public:
     }
 
     // Expose current walls back to Python
-    std::vector<std::vector<mpz_class>> get_walls() const {
-        std::vector<std::vector<mpz_class>> out;
+    std::vector<std::vector<int_class>> get_walls() const {
+        std::vector<std::vector<int_class>> out;
         for (const auto& w : R->sroots) {
-            std::vector<mpz_class> vec_out(rank);
+            std::vector<int_class> vec_out(rank);
             for(int i=0; i<rank; ++i) vec_out[i] = w(0, i);
             out.push_back(vec_out);
         }
         for (const auto& pair : walls) {
             for (const auto& v : pair.second) {
-                std::vector<mpz_class> vec_out(rank);
+                std::vector<int_class> vec_out(rank);
                 for(int i=0; i<rank; ++i) vec_out[i] = v(0, i);
                 out.push_back(vec_out);
             }
@@ -469,7 +481,7 @@ public:
 };
 
 // --- Conversion Helpers ---
-MatrixXi64 to_matrix(const std::vector<std::vector<mpz_class>>& v) {
+MatrixXi64 to_matrix(const std::vector<std::vector<int_class>>& v) {
     if (v.empty()) return MatrixXi64(0, 0);
     MatrixXi64 m(v.size(), v[0].size());
     for (size_t i = 0; i < v.size(); ++i)
@@ -478,21 +490,21 @@ MatrixXi64 to_matrix(const std::vector<std::vector<mpz_class>>& v) {
     return m;
 }
 
-RowVectorXi64 to_row_vector(const std::vector<mpz_class>& v) {
+RowVectorXi64 to_row_vector(const std::vector<int_class>& v) {
     if (v.empty()) return RowVectorXi64(1, 0);
     RowVectorXi64 m(1, v.size());
     for (size_t i = 0; i < v.size(); ++i) m(0, i) = v[i];
     return m;
 }
 
-std::vector<mpz_class> to_std_vector(const RowVectorXi64& m) {
-    std::vector<mpz_class> v(m.cols());
+std::vector<int_class> to_std_vector(const RowVectorXi64& m) {
+    std::vector<int_class> v(m.cols());
     for (int i = 0; i < m.cols(); ++i) v[i] = m(0, i);
     return v;
 }
 
-std::vector<std::vector<mpz_class>> to_std_matrix(const MatrixXi64& m) {
-    std::vector<std::vector<mpz_class>> v(m.rows(), std::vector<mpz_class>(m.cols()));
+std::vector<std::vector<int_class>> to_std_matrix(const MatrixXi64& m) {
+    std::vector<std::vector<int_class>> v(m.rows(), std::vector<int_class>(m.cols()));
     for(int i=0; i<m.rows(); ++i)
         for(int j=0; j<m.cols(); ++j)
             v[i][j] = m(i,j);
@@ -505,35 +517,35 @@ PYBIND11_MODULE(vsearch_cpp, m) {
 
     // --- Expose RootSysCpp ---
     py::class_<RootSysCpp, std::shared_ptr<RootSysCpp>>(m, "RootSysCpp")
-        .def(py::init([](const std::vector<std::vector<mpz_class>>& A_in, 
-                         const std::vector<std::vector<mpz_class>>& roots_in, 
-                         const std::vector<mpz_class>& base_in) {
+        .def(py::init([](const std::vector<std::vector<int_class>>& A_in, 
+                         const std::vector<std::vector<int_class>>& roots_in, 
+                         const std::vector<int_class>& base_in) {
             std::vector<RowVectorXi64> eigen_roots;
             for (const auto& r : roots_in) eigen_roots.push_back(to_row_vector(r));
             return std::make_shared<RootSysCpp>(to_matrix(A_in), eigen_roots, to_row_vector(base_in));
-        }), py::arg("A"), py::arg("roots"), py::arg("base") = std::vector<mpz_class>())
+        }), py::arg("A"), py::arg("roots"), py::arg("base") = std::vector<int_class>())
         
-        .def("reflect", [](RootSysCpp& self, const std::vector<mpz_class>& v) {
+        .def("reflect", [](RootSysCpp& self, const std::vector<int_class>& v) {
             return to_std_vector(self.reflect(to_row_vector(v)));
         }, py::arg("v"))
 
-        .def("closed_chamber", [](RootSysCpp& self, const std::vector<mpz_class>& v) {
+        .def("closed_chamber", [](RootSysCpp& self, const std::vector<int_class>& v) {
             return self.closed_chamber(to_row_vector(v));
         }, py::arg("v"))
         
-        .def("reflection", [](RootSysCpp& self, const std::vector<mpz_class>& r) {
+        .def("reflection", [](RootSysCpp& self, const std::vector<int_class>& r) {
             return to_std_matrix(self.reflection(to_row_vector(r)));
         }, py::arg("r"))
         
         .def_property_readonly("sroots", [](const RootSysCpp& self) {
-            std::vector<std::vector<mpz_class>> out;
+            std::vector<std::vector<int_class>> out;
             for (const auto& r : self.sroots) out.push_back(to_std_vector(r));
             return out;
         });
 
     // --- Expose VSearchCpp ---
     py::class_<VSearchCpp>(m, "VSearchCpp")
-        .def(py::init([](const std::vector<std::vector<mpz_class>>& A_in, const std::vector<mpz_class>& base_in, const int exp, int num_threads) {
+        .def(py::init([](const std::vector<std::vector<int_class>>& A_in, const std::vector<int_class>& base_in, const int exp, int num_threads) {
             return std::make_unique<VSearchCpp>(to_matrix(A_in), to_row_vector(base_in), exp, num_threads);
         }), py::arg("A"), py::arg("base"), py::arg("exp"), py::arg("num_threads") = 1)
         
