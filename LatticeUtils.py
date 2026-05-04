@@ -12,6 +12,51 @@ import cdd.gmp
 from fractions import Fraction
 import re
 import random as rnd
+import fp_search_cpp
+
+
+def irred_decomp(L: Lattice):
+    if L.signature[1] == 0:
+        sign = 1
+    elif L.signature[0] == 0:
+        sign = -1
+        L = L(-1)
+    else:
+        raise ValueError("The lattice must be either positive or negative")
+    
+    try:
+        B, basis = L.A.lll(rep='gram', transform=True)
+        basis = basis.tolist()
+        M = Lattice(L.rank, B.tolist())
+    except:
+        basis = [[int(i == j) for i in range(L.rank)] for j in range(L.rank)]
+        M = L
+
+    ubound = max(int(M.A[i, i]) for i in range(M.rank))
+    print(ubound)
+    fps = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
+    vecs = fps.search_all()
+    vecs.sort(key = lambda x: M.square(x))
+    print(vecs[-10:])
+    sublat = []
+    for v in vecs:
+        I = set()
+        b_new = [v]
+        for i, b in enumerate(sublat):
+            if any(M.product(v, x) != 0 for x in b):
+                I.add(i)
+                b_new.extend(sublat[i])
+                break
+        sublat_new = [M.image(b_new)]
+        if len(I) < len(sublat):
+            sublat_new.extend([sublat[i] for i in range(len(sublat)) if i not in I])
+        sublat = sublat_new
+        print(len(sublat), end='\r')
+        span = sum(sublat, start=[])
+        if len(span) == M.rank and M.index(span) == 1:
+            break
+    return(sublat)
+
 
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:

@@ -323,6 +323,7 @@ private:
     std::vector<std::pair<int_class, FPSearch>> fps_workers;
     std::pair<int_class, FPSearch> init_fps() {
         h_counter += 1;
+        std::cout << "Initializing FPSearch with h_counter = " << h_counter << std::endl;
         Eigen::VectorXd b_h(rank - 1);
         for (int i = 0; i < rank - 1; ++i) {
             mpq_class val = mpq_class(-base(0, i + 1) * h_counter, base(0, 0));

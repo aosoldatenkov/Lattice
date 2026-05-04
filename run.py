@@ -112,17 +112,20 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-start = time.perf_counter()
-L = I_lat(1, 15)
-print(L.info())
-print(L.A)
-V = Vinberg(L, h_batch=10)
-V.print_info()
-walls = V.run(root_batch=1, use_reflections=False)
-for w in walls:
-    print(w, L.square(w))
-end = time.perf_counter()
-print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
+# start = time.perf_counter()
+# L = I_lat(1, 16)
+# print(L.info())
+# print(L.A)
+# V = Vinberg(L, h_batch=1)
+# V.print_info()
+# walls = V.run(root_batch=1, use_reflections=False)
+# for w in walls:
+#     print(w, L.square(w))
+# end = time.perf_counter()
+# print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
+
+L = Leech_lat()
+print(len(irred_decomp(L)))
 
 # count = 0
 # while True:
