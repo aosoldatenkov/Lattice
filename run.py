@@ -131,7 +131,11 @@ basis = [[int(i == j) + int(i < j) * rnd.randint(-3, 3) for j in range(M.rank)] 
 L = Lattice(L.rank, L.batch_prod(basis, basis))
 print(L.A)
 print(L.A.lll(rep='gram'))
-print(len(irred_decomp(L)))
+sublat = irred_decomp(L)
+for b in sublat:
+    S = Lattice(len(b), L.batch_prod(b, b))
+    print(S.info())
+    print(S.A)
 
 # count = 0
 # while True:

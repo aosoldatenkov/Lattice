@@ -30,11 +30,9 @@ def irred_decomp(L: Lattice):
         M = L
 
     ubound = max(int(M.A[i, i]) for i in range(M.rank))
-    print(ubound)
     fps = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
     vecs = fps.search_all()
     vecs.sort(key = lambda x: M.square(x))
-    print(len(vecs))
     sublat = []
     for v in vecs:
         I = set()
@@ -44,16 +42,16 @@ def irred_decomp(L: Lattice):
                 I.add(i)
                 b_new.extend(sublat[i])
                 break
-        basis = fl.fmpz_mat(M.image(b_new)).lll().tolist()
-        sublat_new = [basis]
+        b_reduced = fl.fmpz_mat(M.image(b_new)).lll().tolist()
+        sublat_new = [b_reduced]
         if len(I) < len(sublat):
             sublat_new.extend([sublat[i] for i in range(len(sublat)) if i not in I])
         sublat = sublat_new
         span = sum(sublat, start=[])
         if len(span) == M.rank and M.index(span) == 1:
             break
-    return(sublat)
-
+    T = fl.fmpz_mat(basis)
+    return([(fl.fmpz_mat(b) * T).tolist() for b in sublat])
 
 
 def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
