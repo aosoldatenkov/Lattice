@@ -124,7 +124,13 @@ def TestReflections():
 # end = time.perf_counter()
 # print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
 
-L = Leech_lat()
+M = A_lat(2) + A_lat(3) + A_lat(2) + A_lat(3)
+basis = [[int(i == j) + int(i > j) * rnd.randint(-3, 3) for j in range(M.rank)] for i in range(M.rank)]
+L = Lattice(M.rank, M.batch_prod(basis, basis))
+basis = [[int(i == j) + int(i < j) * rnd.randint(-3, 3) for j in range(M.rank)] for i in range(M.rank)]
+L = Lattice(L.rank, L.batch_prod(basis, basis))
+print(L.A)
+print(L.A.lll(rep='gram'))
 print(len(irred_decomp(L)))
 
 # count = 0

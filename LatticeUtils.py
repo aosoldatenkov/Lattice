@@ -16,13 +16,10 @@ import fp_search_cpp
 
 
 def irred_decomp(L: Lattice):
-    if L.signature[1] == 0:
-        sign = 1
-    elif L.signature[0] == 0:
-        sign = -1
-        L = L(-1)
-    else:
+    if L.signature not in [(0, L.rank), (L.rank, 0)]:
         raise ValueError("The lattice must be either positive or negative")
+    if L.signature[0] == 0:
+        L = L(-1)
     
     try:
         B, basis = L.A.lll(rep='gram', transform=True)
@@ -37,7 +34,7 @@ def irred_decomp(L: Lattice):
     fps = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
     vecs = fps.search_all()
     vecs.sort(key = lambda x: M.square(x))
-    print(vecs[-10:])
+    print(len(vecs))
     sublat = []
     for v in vecs:
         I = set()
@@ -47,11 +44,11 @@ def irred_decomp(L: Lattice):
                 I.add(i)
                 b_new.extend(sublat[i])
                 break
-        sublat_new = [M.image(b_new)]
+        basis = fl.fmpz_mat(M.image(b_new)).lll().tolist()
+        sublat_new = [basis]
         if len(I) < len(sublat):
             sublat_new.extend([sublat[i] for i in range(len(sublat)) if i not in I])
         sublat = sublat_new
-        print(len(sublat), end='\r')
         span = sum(sublat, start=[])
         if len(span) == M.rank and M.index(span) == 1:
             break
