@@ -124,18 +124,27 @@ def TestReflections():
 # end = time.perf_counter()
 # print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
 
-M = A_lat(2) + A_lat(3) + A_lat(2) + A_lat(3)
-basis = [[int(i == j) + int(i > j) * rnd.randint(-3, 3) for j in range(M.rank)] for i in range(M.rank)]
-L = Lattice(M.rank, M.batch_prod(basis, basis))
-basis = [[int(i == j) + int(i < j) * rnd.randint(-3, 3) for j in range(M.rank)] for i in range(M.rank)]
-L = Lattice(L.rank, L.batch_prod(basis, basis))
-print(L.A)
-print(L.A.lll(rep='gram'))
-sublat = irred_decomp(L)
-for b in sublat:
-    S = Lattice(len(b), L.batch_prod(b, b))
-    print(S.info())
-    print(S.A)
+# M = C_lat(5)
+# FPS = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, 2.5)
+# vecs = FPS.search_all()
+# roots =[]
+# for v in vecs:
+#     if M.is_root(v):
+#         roots.append(v)
+# RS = vsearch_cpp.RootSysCpp(M.A.tolist(), roots)
+
+with open('in', "r") as f:
+    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    for j, l in enumerate(lattices[1800:1810]):
+        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+        lstart = time.perf_counter()
+        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+        print(L.info())
+        print(L.A)
+        V = Vinberg(L, h_batch=100)
+        V.print_info()
+        walls = V.run(root_batch=1000000, use_reflections=False)
+        print(Coxeter_graph(L, walls))
 
 # count = 0
 # while True:

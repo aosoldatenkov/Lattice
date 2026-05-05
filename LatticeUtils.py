@@ -15,6 +15,26 @@ import random as rnd
 import fp_search_cpp
 
 
+def Coxeter_graph(L, roots):
+    """Given a lattice L and a list of roots in L, returns the Coxeter graph of the root system spanned by those roots."""
+    A = L.batch_prod(roots, roots)
+    edges = {}
+    for i in range(len(roots)):
+        for j in range(i + 1, len(roots)):
+            cos = Fraction(int(A[i][j] ** 2), int(A[i][i] * A[j][j]))
+            if cos == 1:
+                edges[(i, j)] = -1
+            elif cos == 0:
+                edges[(i, j)] = 2
+            elif cos == Fraction(1, 4):
+                edges[(i, j)] = 3
+            elif cos == Fraction(2, 4):
+                edges[(i, j)] = 4
+            elif cos == Fraction(3, 4):
+                edges[(i, j)] = 6
+    return edges
+
+
 def irred_decomp(L: Lattice):
     if L.signature not in [(0, L.rank), (L.rank, 0)]:
         raise ValueError("The lattice must be either positive or negative")
