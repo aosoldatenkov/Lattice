@@ -18,20 +18,25 @@ import fp_search_cpp
 def Coxeter_graph(L, roots):
     """Given a lattice L and a list of roots in L, returns the Coxeter graph of the root system spanned by those roots."""
     A = L.batch_prod(roots, roots)
+    C = [[Fraction(int(A[i][j] ** 2), int(A[i][i] * A[j][j])) for j in range(len(roots))] for i in range(len(roots))]
+    graph = {i: [j for j in range(len(roots)) if i != j and C[i][j] <= 1] for i in range(len(roots))}
+    path = order_vert(graph, list(range(len(roots))))
+    ord = [path.index(i) for i in range(len(roots))]
     edges = {}
     for i in range(len(roots)):
         for j in range(i + 1, len(roots)):
-            cos = Fraction(int(A[i][j] ** 2), int(A[i][i] * A[j][j]))
+            cos = C[i][j]
+            pair = (min(ord[i], ord[j]), max(ord[i], ord[j]))
             if cos == 1:
-                edges[(i, j)] = -1
+                edges[pair] = 'inf'
             elif cos == 0:
-                edges[(i, j)] = 2
+                edges[pair] = 2
             elif cos == Fraction(1, 4):
-                edges[(i, j)] = 3
+                edges[pair] = 3
             elif cos == Fraction(2, 4):
-                edges[(i, j)] = 4
+                edges[pair] = 4
             elif cos == Fraction(3, 4):
-                edges[(i, j)] = 6
+                edges[pair] = 6
     return edges
 
 

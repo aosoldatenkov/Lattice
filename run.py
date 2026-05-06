@@ -133,9 +133,12 @@ def TestReflections():
 #         roots.append(v)
 # RS = vsearch_cpp.RootSysCpp(M.A.tolist(), roots)
 
+def Allcock_group(graph, n):
+    return [graph[(min(i, (i + 1) % n), max(i, (i + 1) % n))] for i in range(n)]
+
 with open('in', "r") as f:
     lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-    for j, l in enumerate(lattices[1800:1810]):
+    for j, l in enumerate(lattices[:1000]):
         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
         lstart = time.perf_counter()
         L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
@@ -144,7 +147,7 @@ with open('in', "r") as f:
         V = Vinberg(L, h_batch=100)
         V.print_info()
         walls = V.run(root_batch=1000000, use_reflections=False)
-        print(Coxeter_graph(L, walls))
+        print(Allcock_group(Coxeter_graph(L, walls), len(walls)))
 
 # count = 0
 # while True:
