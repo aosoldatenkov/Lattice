@@ -64,24 +64,51 @@ class DiscForm:
             current = [i]
             dfs(current)
         return max_isospaces
+    
+def Allcock_group(graph, n):
+    return [graph[(min(i, (i + 1) % n), max(i, (i + 1) % n))] for i in range(n)]
+
+def Allcock_group_compare(g1, g2):
+    if len(g1) != len(g2):
+        return False
+    gg = g2 + g2
+    comp = [all(g1[i] == gg[i + j] for i in range(len(g1))) for j in range(len(g2))] + \
+           [all(g1[-i] == gg[i + j] for i in range(len(g1))) for j in range(len(g2))]
+    if any(comp):
+        return True
+    return False
 
 def CheckAllcock():
+    groups = {}
     start = time.perf_counter()
-    with open('in', "r") as f:
-        lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+    with open('out', "r") as f:
+        lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
         for j, l in enumerate(lattices):
             print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
             lstart = time.perf_counter()
-            L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
+            L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
+            nwalls = int(l[-3])
+            Wno = int(l[-2])
             print(L.info())
             print(L.A)
             V = Vinberg(L, h_batch=100)
             V.print_info()
             walls = V.run(root_batch=1000000, use_reflections=False)
             lend = time.perf_counter()
+            print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
             for w in walls:
                 print(w, L.square(w))
-            print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
+            if len(walls) != nwalls:
+                print(f"Wrong number of walls, {nwalls} expected")
+                break
+            group = Allcock_group(Coxeter_graph(L, walls), len(walls))
+            print(f"The Weyl group: {group}")
+            if Wno not in groups:
+                groups[Wno] = group
+            else:
+                if not Allcock_group_compare(groups[Wno], group):
+                    print(f"The Weyl group does not match")
+                    break
     end = time.perf_counter()
     print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
 
@@ -112,6 +139,8 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
+CheckAllcock()
+
 # start = time.perf_counter()
 # L = I_lat(1, 16)
 # print(L.info())
@@ -132,22 +161,6 @@ def TestReflections():
 #     if M.is_root(v):
 #         roots.append(v)
 # RS = vsearch_cpp.RootSysCpp(M.A.tolist(), roots)
-
-def Allcock_group(graph, n):
-    return [graph[(min(i, (i + 1) % n), max(i, (i + 1) % n))] for i in range(n)]
-
-with open('in', "r") as f:
-    lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
-    for j, l in enumerate(lattices[:1000]):
-        print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-        lstart = time.perf_counter()
-        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])(-1)
-        print(L.info())
-        print(L.A)
-        V = Vinberg(L, h_batch=100)
-        V.print_info()
-        walls = V.run(root_batch=1000000, use_reflections=False)
-        print(Allcock_group(Coxeter_graph(L, walls), len(walls)))
 
 # count = 0
 # while True:

@@ -5,6 +5,7 @@ from Lattice import Lattice
 from BinLattice import BinLattice
 from IntVectors import *
 from typing import List, Iterator
+from time import sleep
 import numpy as np
 import math
 import cdd
@@ -345,40 +346,53 @@ def lorentz_basis_3d(L, bound = 10000):
 
 def Allcock_list(fin, fout):
     with open(fin, "r") as f:
-        lattices = [re.findall(r'-?\d+', line.strip())[:9] for line in f.readlines()]
+        lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
     with open(fout, "w") as f:
         for i, l in enumerate(lattices):
             print('#' * 50 + f"{i + 1:^7}" + '#' * 50)
             L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
+            Lno = int(l[-1])
+            Wno = int(l[-2])
+            if (len(l) - 14) % 3 != 0:
+                print(f"Error parsing line {i}")
+            Nwalls = (len(l) - 14) // 3
             print(L.info())
             print('Gram matrix:')
             print(L.A)
             if L.signature != (2, 1):
-                print("Lattice does not have signature (2, 1), skipping...")
+                print(f"The lattice {i + 1} does not have Lorentzian signature, skipping...")
                 continue
-            print("LLL-reduced Gram matrix:")
-            try:
-                M = Lattice(3, L.lll())
-                reduced = True
-            except:
-                reduced = False
-            if not reduced:
+            L = L(-1)
+            for i in range(3):
                 try:
-                    M = Lattice(3, L._lll_indefinite_sp())
+                    M = Lattice(3, L.lll())
                     reduced = True
                 except:
-                    print("Error occurred while computing LLL reduction. Lattice number", i + 1, file=f)
-                    print(L.A.tolist(), file=f)
-                    continue
+                    reduced = False
+                if not reduced:
+                    rescale = [1e15, 1e16, 1e17]
+                    for s in rescale:
+                        try:
+                            M = Lattice(3, L._lll_indefinite_sp(rescale=s))
+                            reduced = True
+                            break
+                        except:
+                            continue
+                    if not reduced:    
+                        print("Error occurred while computing LLL reduction. Lattice number", i + 1)
+                        sleep(1)
+                        M = L
+                L = M
+            print("LLL-reduced Gram matrix:")
             print(M.A)
-            print("Constructing hyperbolic basis...")
+            print("Constructing Lorentzian basis...")
             basis = lorentz_basis_3d(M)
             if not basis:
-                print("No hyperbolic basis found, skipping...")
-                print(M.A.tolist(), file=f)
-                continue
-            N = Lattice(3, M.batch_prod(basis, basis))
+                print("No Lorentzian basis found, using the LLL basis")
+                N = M
+            else:
+                N = Lattice(3, M.batch_prod(basis, basis))
             print(N.info())
             print(N.A)
-            print(N.A.tolist(), file=f)
+            print([N.A.tolist()] + [Nwalls, Wno, Lno], file=f)
 
