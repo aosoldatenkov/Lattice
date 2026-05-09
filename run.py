@@ -13,6 +13,7 @@ from IntVectors import *
 from Vinberg import *
 from FPSearch import *
 from VSearch import *
+from Allcock import *
 import fp_search_cpp
 import vsearch_cpp
 
@@ -35,7 +36,7 @@ class DiscForm:
             u_mat = fl.fmpz_mat(1, self.rank, u)
             _, denom =(u_mat * self.A * u_mat.transpose()).numer_denom()
             if denom == 1:
-                isotropic.append(u)
+                isotropic.append(list(u))
         return isotropic
     
     def _list_max_isospaces(self):
@@ -65,53 +66,6 @@ class DiscForm:
             dfs(current)
         return max_isospaces
     
-def Allcock_group(graph, n):
-    return [graph[(min(i, (i + 1) % n), max(i, (i + 1) % n))] for i in range(n)]
-
-def Allcock_group_compare(g1, g2):
-    if len(g1) != len(g2):
-        return False
-    gg = g2 + g2
-    comp = [all(g1[i] == gg[i + j] for i in range(len(g1))) for j in range(len(g2))] + \
-           [all(g1[-i] == gg[i + j] for i in range(len(g1))) for j in range(len(g2))]
-    if any(comp):
-        return True
-    return False
-
-def CheckAllcock():
-    groups = {}
-    start = time.perf_counter()
-    with open('out', "r") as f:
-        lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
-        for j, l in enumerate(lattices):
-            print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
-            lstart = time.perf_counter()
-            L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
-            nwalls = int(l[-3])
-            Wno = int(l[-2])
-            print(L.info())
-            print(L.A)
-            V = Vinberg(L, h_batch=100)
-            V.print_info()
-            walls = V.run(root_batch=1000000, use_reflections=False)
-            lend = time.perf_counter()
-            print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
-            for w in walls:
-                print(w, L.square(w))
-            if len(walls) != nwalls:
-                print(f"Wrong number of walls, {nwalls} expected")
-                break
-            group = Allcock_group(Coxeter_graph(L, walls), len(walls))
-            print(f"The Weyl group: {group}")
-            if Wno not in groups:
-                groups[Wno] = group
-            else:
-                if not Allcock_group_compare(groups[Wno], group):
-                    print(f"The Weyl group does not match")
-                    break
-    end = time.perf_counter()
-    print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
-
 def TestReflections():
     L = E_lat(8) + E_lat(8)
     print(L.info())
@@ -139,10 +93,29 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-CheckAllcock()
+L = I_lat(1, 21)
+basis = L.even_sublattice()
+L = Lattice(22, L.batch_prod(basis, basis))
+print(L.info())
 
-# start = time.perf_counter()
-# L = I_lat(1, 16)
+compl = [[[2, 0], [0, 6]], [[4, 2], [2, 4]]]
+for b in compl:
+    C = Lattice(2, b)
+    print(C.info())
+    D = DiscForm(L + C)
+    iso = D._list_max_isospaces()
+    for s in iso:
+        gens = [D.iso[i] for i in s] + D.D.tolist()
+        basis = Lattice.image(gens)
+        fl_bas = fl.fmpz_mat(basis)
+        A, denom = (fl_bas * D.A * fl_bas.transpose()).numer_denom()
+        M = Lattice(24, A.tolist())
+        if M.parity == 0:
+            print(M.info())
+            DD = DiscForm(M)
+            print(DD.iso)
+            print(DD.A)
+
 # print(L.info())
 # print(L.A)
 # V = Vinberg(L, h_batch=1)

@@ -22,7 +22,7 @@ class Vinberg:
         self._init_basis()
 
     def _init_basis(self):
-        b = sorted(self.list_bases(3), key=lambda x: x[0])
+        b = sorted(self.list_bases(2), key=lambda x: x[0])
         self.base = b[0][1]
         self.basis = b[0][2]
         B, _ = fl.fmpz_mat(self.basis).inv().numer_denom()
