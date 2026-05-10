@@ -16,6 +16,34 @@ import random as rnd
 import fp_search_cpp
 
 
+def list_bin_lattices(max_d, signature=None, parity=None):
+    ll = defaultdict(list)
+    max_a = int(2. * math.sqrt(max_d) / math.sqrt(3)) + 1
+    if signature == None or signature == (1, 1):
+        # Listing the indefinite lattices that represent zero
+        max_h = int(math.sqrt(max_d)) + 1
+        for h, b in [(h, b) for h in range(1, max_h) for b in range(2 * h + 1)]:
+            if parity != None and b % 2 != parity:
+                continue
+            lat = BinLattice(0, b, h)
+            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
+                ll[lat.disc].append(lat)
+    # Listing the positive and the rest of the indefinite lattices
+    for a, h in [(a, h) for a in range(-max_a, max_a) for h in range(abs(a)) if a != 0]:
+        max_b = int((max_d + h * h) / abs(a)) + 1
+        for b in range(-max_b, max_b):
+            if abs(a * b - h * h) > max_d:
+                continue
+            if parity != None and (b % 2 != parity or a % 2 != parity):
+                continue
+            lat = BinLattice(a, b, h)
+            if signature != None and lat.signature != signature:
+                continue
+            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
+                ll[lat.disc].append(lat)
+    return ll
+
+
 def Coxeter_graph(L, roots):
     """Given a lattice L and a list of roots in L, returns the Coxeter graph of the root system spanned by those roots."""
     A = L.batch_prod(roots, roots)

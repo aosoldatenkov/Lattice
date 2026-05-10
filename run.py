@@ -45,28 +45,39 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-L = I_lat(1, 21)
-basis = L.even_sublattice()
-L = Lattice(22, L.batch_prod(basis, basis))
-print(L.info())
+ll = list_bin_lattices(100, parity = 0, signature = (2, 0))
+for k in sorted(ll.keys()):
+    print(f'{k:3}: ', ', '.join(f'({l.can.a}, {l.can.b}, {l.can.h})' for l in ll[k]))
 
-compl = [[[2, 0], [0, 6]], [[4, 2], [2, 4]]]
-for b in compl:
-    C = Lattice(2, b)
-    print(C.info())
-    D = DiscForm(L + C)
-    iso = D._list_max_isospaces()
-    for s in iso:
-        gens = [D.iso[i] for i in s] + D.D.tolist()
-        basis = Lattice.image(gens)
-        fl_bas = fl.fmpz_mat(basis)
-        A, denom = (fl_bas * D.A * fl_bas.transpose()).numer_denom()
-        M = Lattice(24, A.tolist())
-        if M.parity == 0:
-            print(M.info())
-            DD = DiscForm(M)
-            print(DD.iso)
-            print(DD.A)
+print()
+print(sum(len(ll[d]) for d in ll.keys()), 'isomorphism classes of lattices listed')
+
+# L = D_lat(20) + U_lat()
+# print(L(-1).info())
+# D = DiscForm(L(-1))
+# print(D.Ared)
+
+# L = I_lat(1, 21)
+# basis = L.even_sublattice()
+# L = Lattice(22, L.batch_prod(basis, basis))
+# print(L.info())
+# D = DiscForm(L)
+# print(D.Ared)
+
+# compl = [[[2, 0], [0, 6]], [[4, 2], [2, 4]]]
+# for b in compl:
+#     C = Lattice(2, b)
+#     print(C.info())
+#     D = DiscForm(L + C)
+#     print(D.Ared)
+#     iso = D.list_max_isospaces()
+#     for s in iso:
+#         M = D.overlattice(s)
+#         if M.parity == 0:
+#             print(M.info())
+#             DD = DiscForm(M)
+#             print(DD.iso)
+#             print(DD.Ared)
 
 # print(L.info())
 # print(L.A)

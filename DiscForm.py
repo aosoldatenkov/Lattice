@@ -13,26 +13,39 @@ class DiscForm:
         self.A = Dual.transpose() * L.A * Dual
         self.D = D
         self.rank = L.rank
-        self.iso = self._list_iso()
+        self._init_A_red()
+        self.iso = None
 
-    def _list_iso(self):
+    def _init_A_red(self):
+        i0 = min([self.rank] + [i for i in range(self.rank) if self.D[i, i] > 1])
+        self.ord = [int(self.D[i, i]) for i in range(i0, self.rank)]
+        def reduce(x):
+            return fl.fmpq(x.numer() % x.denom(), x.denom())
+        self.Ared = fl.fmpq_mat([[reduce(x) for x in l[i0:]] for l in self.A.tolist()[i0:]])
+        
+    def list_iso(self):
         isotropic = []
-        for u in product(*[range(self.D[i, i]) for i in range(self.rank)]):
+        n = len(self.ord)
+        for u in product(*[range(self.ord[i]) for i in range(n)]):
             if all(x == 0 for x in u):
                 continue
-            u_mat = fl.fmpz_mat(1, self.rank, u)
-            _, denom =(u_mat * self.A * u_mat.transpose()).numer_denom()
+            u_mat = fl.fmpz_mat(1, n, u)
+            _, denom =(u_mat * self.Ared * u_mat.transpose()).numer_denom()
             if denom == 1:
                 isotropic.append(list(u))
+        self.iso = self._list_iso()
         return isotropic
     
-    def _list_max_isospaces(self):
+    def list_max_isospaces(self):
+        if not self.iso:
+            self.list_iso()
         d = len(self.iso)
+        n = len(self.ord)
         if d == 0:
             return []
         max_isospaces = []
         I = fl.fmpq_mat(self.iso)
-        P = I * self.A * I.transpose()
+        P = I * self.Ared * I.transpose()
         is_integral = [[P[i, j].denom() == 1 for j in range(d)] for i in range(d)]
         def dfs(current):
             nonlocal max_isospaces
@@ -53,3 +66,8 @@ class DiscForm:
             dfs(current)
         return max_isospaces
     
+    def overlattice(self, iso_gens):
+        gens = [[0] * (self.rank - len(self.ord)) + self.iso[i] for i in iso_gens] + self.D.tolist()
+        basis = fl.fmpz_mat(Lattice.image(gens))
+        A, _ = (basis * self.A * basis.transpose()).numer_denom()
+        return Lattice(self.rank, A.tolist())

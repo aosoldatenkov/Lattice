@@ -105,6 +105,13 @@ class BinLattice:
             self._init_definite()
         else:
             self._init_indefinite()
+        # Determine parity if applicable
+        if self._is_even(self.a) and self._is_even(self.b):
+            self.parity = 0
+        elif self._is_integer(self.a) and self._is_integer(self.b):
+            self.parity = 1
+        else:
+            self.parity = None
 
     def _init_degenerate(self) -> None:
         self.can = self.descend(BinBasis((1, 0), (0, 1), self.a, self.b, self.h))
@@ -283,12 +290,9 @@ class BinLattice:
     def info(self) -> str:
         if self.signature == (0, 0):
             return 'Zero lattice'
-            
-        # Determine parity if applicable
-        if self._is_even(self.a) and self._is_even(self.b):
-            parity = 'Even'
-        elif self._is_integer(self.a) and self._is_integer(self.b):
-            parity = 'Odd'
+        
+        if self.parity != None:
+            parity = 'Even' if self.parity == 0 else 'Odd'
         else:
             parity = 'Non-integral'
             
