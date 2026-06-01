@@ -45,12 +45,50 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-ll = list_bin_lattices(100, parity = 0, signature = (2, 0))
-for k in sorted(ll.keys()):
-    print(f'{k:3}: ', ', '.join(f'({l.can.a}, {l.can.b}, {l.can.h})' for l in ll[k]))
+L = Lattice(3, [[-2, 3, 0], [3, 0, 0], [0, 0, -4]])
+print(L.A)
+print(L.info())
+beta = [4, 0, -1]
+eta = [0, 4, -3]
+zeta = [4, 4, -5]
+gamma = [2, 0, -1]
+cusp = [1, 1, -1]
+print(L.product(cusp, [12, 8, -9]))
+# V = Vinberg(L, base=[3, 4, -3], h_batch=10, fps_batch=10000)
+# V.print_info()
+# walls = V.run(max_iterations=50)
+# for w in walls:
+#     print(w, L.square(w))
+# rays, lines = get_extremal_rays(walls, L.A)
+# print(len(rays), len(lines))
+# squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
+# for i, r in enumerate(rays):
+#     print(r, squares[i])
+# group = Allcock_group(Coxeter_graph(L, walls), len(walls))
+# print(f"The Weyl group: {group}")
 
-print()
-print(sum(len(ll[d]) for d in ll.keys()), 'isomorphism classes of lattices listed')
+# rank = 9
+# L = Lattice(rank, [[1 - 2 * int(i == j) for j in range(rank)] for i in range(rank)])
+# print(L.A)
+# print(L.info())
+# V = Vinberg(L, base=[1] * rank, h_batch=20, fps_batch=10000)
+# V.print_info()
+# walls = V.run(max_iterations=5)
+# for w in walls:
+#     print(w, L.square(w))
+# rays, lines = get_extremal_rays(walls, L.A)
+# print(len(rays), len(lines))
+# squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
+# for i, r in enumerate(rays):
+#     print(r, squares[i])
+
+# V = vsearch_cpp.VSearchCpp(L.A.tolist(), [1] + [0] * (rank - 1), 2.1 * L.exp, 50, False, True)
+# V.init_chamber([0] + [i for i in range(1, rank)])
+# count = 0
+# while True:
+#     count += V.run(100000, 10000)
+#     vecs = V.get_vecs()
+#     print(count, end='\r')
 
 # L = D_lat(20) + U_lat()
 # print(L(-1).info())

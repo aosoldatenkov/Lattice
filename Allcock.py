@@ -133,7 +133,7 @@ def CheckAllcock():
             print(L.A)
             V = Vinberg(L, h_batch=100)
             V.print_info()
-            walls = V.run(root_batch=1000000, use_reflections=False)
+            walls = V.run(root_batch=1000000)
             lend = time.perf_counter()
             print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
             for w in walls:

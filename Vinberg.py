@@ -11,23 +11,30 @@ import vsearch_cpp
 
 class Vinberg:
 
-    def __init__(self, L: Lattice, h_batch: int = 3, fps_batch: int = 10 ** 3, use_reflections: bool = True):
+    def __init__(self, L: Lattice, base: list[int] = None, h_batch: int = 3, fps_batch: int = 10 ** 3):
         # The lattice L should be of signature (1, n)
         if L.signature[0] != 1:
             raise ValueError("The lattice should be of signature (1, n)")
         self.L = L
         self.h_batch = h_batch
         self.fps_batch = fps_batch
-        self.use_reflections = use_reflections
+        if base != None and L.square(base) > 0:
+            if (gcd := math.gcd(*base)) != 1:
+                base = [x // gcd for x in base]
+            self.base = base
+            axis, _ = self.L.dual_vec(base)
+            compl = self.L.complement([base])
+            self.basis = [axis] + compl
+        else:
+            b = sorted(self.list_bases(1), key=lambda x: x[0])
+            self.base = b[0][1]
+            self.basis = b[0][2]
         self._init_basis()
 
     def _init_basis(self):
-        b = sorted(self.list_bases(2), key=lambda x: x[0])
-        self.base = b[0][1]
-        self.basis = b[0][2]
         B, _ = fl.fmpz_mat(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
-        self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (fl.fmpz_mat(1, self.L.rank, self.base) * B).tolist()[0], self.M.exp, self.h_batch)
+        self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (fl.fmpz_mat(1, self.L.rank, self.base) * B).tolist()[0], 2.1 * self.M.exp + 0.5, self.h_batch, True, True)
         # self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def list_bases(self, n):
@@ -60,7 +67,7 @@ class Vinberg:
         # B = fl.fmpz_mat(self.basis)
         # print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
-    def run(self, root_batch = 1000, max_iterations = 50000, use_reflections=False):
+    def run(self, root_batch = 1000, max_iterations = 50000):
         count = 0
         while True:
             count += 1
@@ -70,7 +77,7 @@ class Vinberg:
                 B = fl.fmpz_mat(self.basis)
                 W = fl.fmpz_mat(walls)
                 return (W * B).tolist()
-            self.VS.run(root_batch=root_batch, use_reflections=use_reflections)
+            self.VS.run(root_batch, self.fps_batch)
             self.VS.update_walls()
             walls = self.VS.get_walls()
             # self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
