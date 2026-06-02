@@ -21,6 +21,7 @@ Thumbs.db
 
 # --- Auxiliary files ---
 Eigen/
+output/
 *.so
 fp_search__.cpp
 old.py

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random as rnd
 import time
+import os
 from BinLattice import *
 from Lattice import *
 from LatticeUtils import *
@@ -14,6 +15,7 @@ from Vinberg import *
 from FPSearch import *
 from VSearch import *
 from Allcock import *
+from Circle import *
 import fp_search_cpp
 import vsearch_cpp
 
@@ -45,15 +47,64 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-L = Lattice(3, [[-2, 3, 0], [3, 0, 0], [0, 0, -4]])
+def Lorentz_ONB(L: Lattice, axis: List[int]):
+    if L.rank < 2 or L.signature[0] != 1:
+        raise ValueError("The lattice has to be of signature (1, n) with n > 0")
+    if (s := L.square(axis)) <= 0:
+        raise ValueError("The axis has to be a positive vector")
+    axis_np = np.array(axis, dtype=np.float64) / np.sqrt(float(s))
+    C = L.complement([axis])
+    C_np = np.array(C, dtype=np.float64)
+    M = L.batch_prod(C, C)
+    M_np = np.array(M, dtype=np.float64)
+    eival, eivec = np.linalg.eigh(M_np)
+    eival_abs = np.sqrt(np.abs(eival))
+    eivec_norm = eivec / eival_abs
+    norm_basis = eivec_norm.T @ C_np
+    return np.array([axis_np] + [norm_basis[i, :] for i in range(L.rank - 1)], dtype=np.float64)
+
+rank = 4
+L = Lattice(rank, [[1 - 2 * int(i == j) for j in range(rank)] for i in range(rank)])
+base = [1] * rank
+axis, d = L.dual_vec(base)
+compl = L.complement([base])
+basis = [axis] + compl
+L = Lattice(rank, L.batch_prod(basis, basis))
 print(L.A)
-print(L.info())
-beta = [4, 0, -1]
-eta = [0, 4, -3]
-zeta = [4, 4, -5]
-gamma = [2, 0, -1]
-cusp = [1, 1, -1]
-print(L.product(cusp, [12, 8, -9]))
+B, d = fl.fmpq_mat(basis).inv().numer_denom()
+base = (fl.fmpz_mat(1, rank, base) * B).tolist()[0]
+onb = np.linalg.inv(Lorentz_ONB(L, base))
+V = vsearch_cpp.VSearchCpp(L.A.tolist(), base, 1.5, 50, False, True)
+vecs = []
+while len(vecs) < 10 ** 5:
+    V.run(10000, 10000)
+    vecs.extend(V.get_vecs())
+CA = CircleArrangement()
+CA2 = CircleArrangement()
+scale = 300
+min_r = 0.5
+for v in vecs:
+    if L.square(v) == -1:
+        w = np.array(v, dtype=float) @ onb
+        C = Circle(w[0] - w[1], -2 * w[2], -2 * w[3], w[0] + w[1], disc=1, color='white')
+        if not C.is_bounded() and not C.is_line():
+            depth = 1 / abs(C.r)
+        elif not C.is_line():
+            depth = -1 / abs(C.r)
+        else:
+            depth = 0
+        if C.r * scale > min_r:
+            if not C.is_bounded():
+                C.set_attr(color='black')
+            if CA.add_circle(C, depth):
+                CA2.add_circle(Circle(w[0] - w[1], -2 * w[2], -2 * w[3], w[0] + w[1], color='white'), depth)
+frame = CA.find_frame()
+print(CA.size())
+pdf = PDFPicture()
+pdf.append(CA2.tikz_out(frame=frame, r_min=min_r, background='black'))
+os.chdir('output')
+pdf.print('tikzcode.tex')
+
 # V = Vinberg(L, base=[3, 4, -3], h_batch=10, fps_batch=10000)
 # V.print_info()
 # walls = V.run(max_iterations=50)
