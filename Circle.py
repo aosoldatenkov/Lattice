@@ -18,7 +18,7 @@ class Circle:
         self.y = -c / (2 * a)
         self.attr = attr
 
-    def center(self) -> tuple[float]:
+    def center(self) -> tuple[float, float]:
         return self.x, self.y
 
     def inverse(self):
@@ -117,7 +117,7 @@ class Circle:
             w = max(math.sqrt(frame[0] ** 2 + frame[1] ** 2), math.sqrt(frame[2] ** 2 + frame[3] ** 2))
             if "disc" in self.attr:
                 lines.append(f"  \\fill[fill={color}] ({x - ny * w:.16f}pt, {y + nx * w:.16f}pt)" + 
-                             f" -- ({x + ny * w:.16f}pt, {y - nx * w:.16f}pt) -- ({x + (ny + 2 * nx) * w:.16f}pt, {y - (ny - 2 * ny) * w:.16f}pt)" +
+                             f" -- ({x + ny * w:.16f}pt, {y - nx * w:.16f}pt) -- ({x + (ny + 2 * nx) * w:.16f}pt, {y - (nx - 2 * ny) * w:.16f}pt)" +
                              f" -- ({x - (ny - 2 * nx) * w:.16f}pt, {y + (nx + 2 * ny) * w:.16f}pt) -- cycle;\n")
                 if "bcolor" in self.attr:
                     bcolor = self.attr["bcolor"]
@@ -154,18 +154,51 @@ class CircleArrangement:
         return len(self.circles)
         
     def add_circle(self, c: Circle, depth: float) -> bool:
-        if any(a.contains_circ(c) for a, d in self.circles if d >= depth and 'disc' in a.attr):
-            return False
-        if 'disc' in c.attr:
-            self.circles = [[a, d] for a, d in self.circles if d >= depth or not c.contains_circ(a)]
-        self.circles.append([c, depth])
+        # Cache the dictionary lookup once per circle
+        is_disc = 'disc' in c.attr
+        c_bounded = c.is_bounded()
+        
+        # 1. Fast Rejection Check
+        for a, d, a_is_disc in self.circles:
+            if d >= depth and a_is_disc:
+                # AABB Fast-Fail: If bounding boxes don't intersect, it cannot contain 'c'
+                if c_bounded and a.is_bounded():
+                    if abs(a.x - c.x) > a.r + c.r or abs(a.y - c.y) > a.r + c.r:
+                        continue
+                
+                # Only fall back to the heavy math if the bounding boxes overlap
+                if a.contains_circ(c):
+                    return False
+
+        # 2. Fast Removal List Reconstruction
+        if is_disc:
+            new_circles = []
+            for a, d, a_is_disc in self.circles:
+                if d >= depth:
+                    new_circles.append((a, d, a_is_disc))
+                    continue
+                
+                # AABB Fast-Fail: If bounding boxes don't intersect, 'c' cannot contain 'a'
+                if c_bounded and a.is_bounded():
+                    if abs(c.x - a.x) > c.r + a.r or abs(c.y - a.y) > c.r + a.r:
+                        new_circles.append((a, d, a_is_disc))
+                        continue
+                        
+                # Heavy check
+                if not c.contains_circ(a):
+                    new_circles.append((a, d, a_is_disc))
+            
+            self.circles = new_circles
+
+        # Append as a 3-tuple to avoid future dictionary lookups
+        self.circles.append((c, depth, is_disc))
         return True
 
     def add_colors(self, entries):
         self.colors.update(entries)
 
     def find_frame(self):
-        holes = [c for c, d in self.circles if not c.is_bounded() and not c.is_line() and 'disc' in c.attr]
+        holes = [c for c, d, _ in self.circles if not c.is_bounded() and not c.is_line() and 'disc' in c.attr]
         return holes[0] if holes else Circle(1, 0, 0, -1)
 
     def tikz_out(self, frame=None, width=300, height=300, r_min=0, background=None) -> list:
@@ -182,7 +215,7 @@ class CircleArrangement:
         lines.append(f"  \\clip (-{w}pt,-{h}pt) rectangle ({w}pt,{h}pt);\n")
         if background:
             lines.append(f"  \\fill[fill={background}] (-{w}pt,-{h}pt) rectangle ({w}pt,{h}pt);\n")
-        for c, d in sorted(self.circles, key=lambda x: x[1]):
+        for c, d, _ in sorted(self.circles, key=lambda x: x[1]):
             lines.extend(c.tikz_out(ox, oy, scale, r_min, [-w, -h, w, h]))
         lines.append("\\end{scope}\n")
         return lines
@@ -204,6 +237,10 @@ class PDFPicture:
         lines.extend(self.tikz_lines)
         lines.append("\\end{tikzpicture}\n")
         lines.append("\\end{document}\n")
-        with open(fname, "w", encoding="ASCII") as file_out:
+        with open(fname, "w", encoding="utf-8") as file_out:
             file_out.writelines(lines)
-        subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], stdout=subprocess.DEVNULL)
+        result = subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            raise RuntimeError(f"PDFLaTeX compilation failed: {result.stderr.decode('utf-8')}")
