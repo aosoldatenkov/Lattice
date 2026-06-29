@@ -1,5 +1,4 @@
-import flint as fl
-import numpy as np
+from Commons import *
 from Lattice import *
 from LatticeUtils import *
 from IntVectors import *
@@ -7,10 +6,9 @@ from IntVectors import *
 class DiscForm:
 
     def __init__(self, L):
-        M = np.array(L.A.tolist(), dtype=object)
-        D, _, R = smith_normal_form(M)
+        D, _, R = smith_normal_form(L.A)
         Dual = fl.fmpq_mat(R.tolist()) * fl.fmpz_mat(D.tolist()).inv()
-        self.A = Dual.transpose() * L.A * Dual
+        self.A = Dual.transpose() * L.A_fl * Dual
         self.D = D
         self.rank = L.rank
         self._init_A_red()
@@ -33,7 +31,7 @@ class DiscForm:
             _, denom =(u_mat * self.Ared * u_mat.transpose()).numer_denom()
             if denom == 1:
                 isotropic.append(list(u))
-        self.iso = self._list_iso()
+        self.iso = isotropic
         return isotropic
     
     def list_max_isospaces(self):
@@ -68,6 +66,6 @@ class DiscForm:
     
     def overlattice(self, iso_gens):
         gens = [[0] * (self.rank - len(self.ord)) + self.iso[i] for i in iso_gens] + self.D.tolist()
-        basis = fl.fmpz_mat(Lattice.image(gens))
+        basis = imat2flz(Lattice.image(imat(gens)))
         A, _ = (basis * self.A * basis.transpose()).numer_denom()
         return Lattice(self.rank, A.tolist())

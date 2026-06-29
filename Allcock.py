@@ -1,7 +1,7 @@
-import flint as fl
-import numpy as np
+import re
 import time
 import datetime
+from Commons import *
 from BinLattice import BinLattice, int_seq
 from Lattice import *
 from LatticeUtils import *
@@ -20,26 +20,26 @@ def lorentz_basis_3d(L, bound = 10000):
         raise ValueError("Lattice must have signature (1, 2) or (2, 1)")
     
     def decompose(L, u):
-        compl = fl.fmpz_mat(L.complement([u]))
-        v = L.dual_vec(u)[0]
+        compl = L.complement(u)
+        v = L.dual_vec(u)
         if L.index(compl.tolist() + [v]) != 1:
             raise ValueError("Error constructing decomposition")
-        M = compl * L.A * compl.transpose()
+        M = compl @ L.A @ compl.transpose()
         B = BinLattice(M[0, 0], M[1, 1], M[0, 1])
         if B.signature != (0, 2):
             raise ValueError("Error: the complement is not sign-definite")
-        basis = fl.fmpz_mat([list(B.can.e), list(B.can.f)])
+        basis = imat([B.can.e, B.can.f])
         compl = basis * compl
-        M = compl * L.A * compl.transpose()
-        B = fl.fmpz_mat(1, 3, v) * L.A * compl.transpose()
-        M_fl = np.array(M.tolist(), dtype=np.float64)
-        B_fl = np.array(B.tolist(), dtype=np.float64)
+        M = compl @ L.A @ compl.transpose()
+        B = v @ L.A @ compl.transpose()
+        M_fl = np.array(M, dtype=np.float64)
+        B_fl = np.array(B, dtype=np.float64)
         T = -np.linalg.inv(M_fl) @ B_fl.transpose()
-        T_int = fl.fmpz_mat(np.round(T).astype(int).tolist())
+        T_int = imat(np.round(T).astype(int).tolist())
         for delta in product([0, 1, -1], repeat=2):
-            v = (fl.fmpz_mat(1, 3, v) + (fl.fmpz_mat(1, 2, delta) + T_int.transpose()) * compl).tolist()[0]
+            v = v + (imat(delta) + T_int.transpose()) @ compl
             if L.square(v) > 0:
-                return [v] + compl.tolist()
+                return concat_rows(v, compl)
         return None
 
     for u in int_seq(3, nonzero=True, length=bound):
@@ -89,7 +89,7 @@ def Allcock_list(fin, fout):
                             continue
                     if not reduced:    
                         print("Error occurred while computing LLL reduction. Lattice number", i + 1)
-                        sleep(1)
+                        time.sleep(1)
                         M = L
                 L = M
             print("LLL-reduced Gram matrix:")

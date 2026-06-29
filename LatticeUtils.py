@@ -1,17 +1,10 @@
-import flint as fl
-import sympy as sp
-from itertools import product
+from Commons import *
+from IntVectors import *
 from Lattice import Lattice
 from BinLattice import BinLattice
-from IntVectors import *
-from typing import List, Iterator
-from time import sleep
-import numpy as np
-import math
 import cdd
 import cdd.gmp
 from fractions import Fraction
-import re
 import random as rnd
 import fp_search_cpp
 
@@ -46,14 +39,16 @@ def list_bin_lattices(max_d, signature=None, parity=None):
 
 def Coxeter_graph(L, roots):
     """Given a lattice L and a list of roots in L, returns the Coxeter graph of the root system spanned by those roots."""
-    A = L.batch_prod(roots, roots)
-    C = [[Fraction(int(A[i][j] ** 2), int(A[i][i] * A[j][j])) for j in range(len(roots))] for i in range(len(roots))]
-    graph = {i: [j for j in range(len(roots)) if i != j and C[i][j] <= 1] for i in range(len(roots))}
-    path = order_vert(graph, list(range(len(roots))))
-    ord = [path.index(i) for i in range(len(roots))]
+    rmat = imat(roots)
+    nroots = len(roots)
+    A = L.batch_prod(rmat, rmat)
+    C = [[Fraction(int(A[i, j] ** 2), int(A[i, i] * A[j, j])) for j in range(nroots)] for i in range(nroots)]
+    graph = {i: [j for j in range(nroots) if i != j and C[i][j] <= 1] for i in range(nroots)}
+    path = order_vert(graph, list(range(nroots)))
+    ord = [path.index(i) for i in range(nroots)]
     edges = {}
-    for i in range(len(roots)):
-        for j in range(i + 1, len(roots)):
+    for i in range(nroots):
+        for j in range(i + 1, nroots):
             cos = C[i][j]
             pair = (min(ord[i], ord[j]), max(ord[i], ord[j]))
             if cos == 1:
@@ -76,16 +71,15 @@ def irred_decomp(L: Lattice):
         L = L(-1)
     
     try:
-        B, basis = L.A.lll(rep='gram', transform=True)
-        basis = basis.tolist()
+        B, basis = L.A_fl.lll(rep='gram', transform=True)
         M = Lattice(L.rank, B.tolist())
     except:
-        basis = [[int(i == j) for i in range(L.rank)] for j in range(L.rank)]
+        basis = imat2flz(imat_diag([1] * L.rank))
         M = L
 
-    ubound = max(int(M.A[i, i]) for i in range(M.rank))
-    fps = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
-    vecs = fps.search_all()
+    ubound = float(max(M.A[i, i] for i in range(M.rank)))
+    fps = fp_search_cpp.FPSearch(np.array(M.A, dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
+    vecs = [imat(v) for v in fps.search_all()]
     vecs.sort(key = lambda x: M.square(x))
     sublat = []
     for v in vecs:
@@ -96,7 +90,7 @@ def irred_decomp(L: Lattice):
                 I.add(i)
                 b_new.extend(sublat[i])
                 break
-        b_reduced = fl.fmpz_mat(M.image(b_new)).lll().tolist()
+        b_reduced = imat2flz(M.image(b_new)).lll().tolist()
         sublat_new = [b_reduced]
         if len(I) < len(sublat):
             sublat_new.extend([sublat[i] for i in range(len(sublat)) if i not in I])
@@ -104,27 +98,24 @@ def irred_decomp(L: Lattice):
         span = sum(sublat, start=[])
         if len(span) == M.rank and M.index(span) == 1:
             break
-    T = fl.fmpz_mat(basis)
-    return([(fl.fmpz_mat(b) * T).tolist() for b in sublat])
+    return([(imat2flz(b) * basis).tolist() for b in sublat])
 
 
-def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[list[Fraction]]:
+def get_extremal_rays(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> list[fl.fmpq_mat]:
     """
     Given a list of roots (normal vectors) and the ambient Gram matrix,
     returns the exact extremal rays of the resulting polyhedral cone.
     """
-    rank = gram_matrix.nrows()
+    rank = nrows(gram_matrix)
     # 1. Set up the H-representation for cdd.
     # Create the cdd matrix list
     # The first column is 'b' (which is 0 because we are building a cone starting at the origin)
     h_rep_data = []
     for root in roots:
         # Calculate the linear functional vector for this root: v = root^T * G
-        root_mat = fl.fmpz_mat(1, rank, root)
-        functional = root_mat * gram_matrix
-        functional_list = functional.tolist()[0]
+        functional = imat(root) @ gram_matrix
         # Format for cdd: [0, v_1, v_2, ..., v_n]
-        row = [Fraction(0, 1)] + [Fraction(int(val), 1) for val in functional_list]
+        row = [Fraction(0, 1)] + [Fraction(int(val), 1) for val in functional.tolist()]
         h_rep_data.append(row)
     # 2. Initialize the cdd Matrix in exact rational mode
     mat = cdd.gmp.matrix_from_array(h_rep_data, rep_type=cdd.RepType.INEQUALITY)
@@ -137,7 +128,7 @@ def get_extremal_rays(roots: list[list[int]], gram_matrix: fl.fmpz_mat) -> list[
         ray_type = row[0]
         if ray_type == 0:
             # Extract just the vector components
-            ray = [fl.fmpq(row[j].numerator, row[j].denominator) for j in range(1, rank + 1)]
+            ray = fl.fmpq_mat(1, rank, [fl.fmpq(row[j].numerator, row[j].denominator) for j in range(1, rank + 1)])
             extreme_rays.append(ray)
     return extreme_rays, v_rep.lin_set
 
@@ -173,7 +164,7 @@ def order_vert(graph, v):
     return best_path + order_vert(graph, rest)
 
 
-def simple_roots(L, roots, dir = None):
+def simple_roots(L: Lattice, roots: List[IMat] | List[List[int]], dir = None) -> List[IMat] | List[List[int]]:
     """Given a lattice L, a list of roots in L, and an optional direction dir,
     returns a list of simple roots for the root system spanned by the given roots.
     If dir is not provided, it will be chosen automatically."""
@@ -189,14 +180,15 @@ def simple_roots(L, roots, dir = None):
         # Pick a direction that is not orthogonal to any root. This will be used to determine which roots are positive.
         rnd.seed(roots[0][0])
         while True:
-            dir = [rnd.randint(1, 10 ** 6) for _ in range(L.rank)]
+            dir = imat([rnd.randint(1, 10 ** 6) for _ in range(L.rank)])
             if all(L.product(dir, r) != 0 for r in roots):
                 break
     pos_roots = [r for r in roots if L.product(dir, r) > 0]
     pos_roots.sort(key=lambda r: L.product(dir, r))
     simple = []
     for r in pos_roots:
-        M = fl.fmpz_mat(L.batch_prod(simple + [r], simple + [r]))
+        extended = imat(simple + [r])
+        M = imat2flz(L.batch_prod(extended, extended))
         if M.det() != 0:
             simple.append(r)
         if len(simple) == L.rank:
@@ -216,31 +208,31 @@ def majorant(A_matrix: np.ndarray) -> np.ndarray:
 def A_lat(n):
     I = Lattice(1, [[1]])
     R = I * (n + 1)
-    E = [[int(i == j) - int(i == j + 1) for i in range(n + 1)] for j in range(n)]
+    E = imat([[int(i == j) - int(i == j + 1) for i in range(n + 1)] for j in range(n)])
     A = R.batch_prod(E, E)
     return Lattice(n, A)
 
 def B_lat(n):
     I = Lattice(1, [[1]])
     R = I * n
-    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[int(i == n - 1) for i in range(n)]]
+    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[int(i == n - 1) for i in range(n)]])
     A = R.batch_prod(E, E)
     return Lattice(n, A)
 
 def C_lat(n):
     I = Lattice(1, [[1]])
     R = I * n
-    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[2 * int(i == n - 1) for i in range(n)]]
+    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[2 * int(i == n - 1) for i in range(n)]])
     A = R.batch_prod(E, E)
     return Lattice(n, A)
 
 def D_lat(n):
     I = Lattice(1, [[1]])
     R = I * n
-    E = [[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[int(i == n - 1 or i == n - 2) for i in range(n)]]
+    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
+        [[int(i == n - 1 or i == n - 2) for i in range(n)]])
     A = R.batch_prod(E, E)
     return Lattice(n, A)
 
@@ -276,7 +268,7 @@ def II_lat_n_1(n):
     basis = [[int(i == j) for j in range(n)] + [-1] for i in range(1, n)]
     basis += [[0] * n + [2]]
     basis += [[1] * n + [-1]]
-    A = L.batch_prod(basis, basis)
+    A = L.batch_prod(imat(basis), imat(basis))
     A[n][n - 1] //= 2
     A[n - 1][n] //= 2
     A[n][n] //= 4
@@ -287,13 +279,13 @@ def Leech_lat():
     v = [i + 1 for i in range(24)] + [185, 0]
     compl = M.complement([v])
     basis = M.subquotient(compl)
-    return Lattice(len(basis), M.batch_prod(basis, basis))
+    return Lattice(basis.shape[0], M.batch_prod(basis, basis))
 
 def Leech_lat_alt():
     M = I_lat(24, 1)
     v = [2 * i + 1 for i in range(1, 24)] + [51, 145]
     basis = M.complement([v])
-    return Lattice(len(basis), M.batch_prod(basis, basis))
+    return Lattice(basis.shape[0], M.batch_prod(basis, basis))
 
 
 def E_lat_test(n):
@@ -309,8 +301,8 @@ def E_lat_test(n):
     v = [-3] + [1] * n
     compl = L.complement([v])
     A = L.batch_prod(compl, compl)
-    M = Lattice(len(compl), A)
-    M = Lattice(len(compl), M.lll())
+    M = Lattice(compl.shape[0], A)
+    M = Lattice(compl.shape[0], M.lll())
     roots = []
     for v in int_seq(n, nonzero=True):
         if M.is_root(v):
@@ -321,12 +313,12 @@ def E_lat_test(n):
         if all(M.product([n + v[i] for i in range(n)], r) != 0 for r in roots):
             dir = [n + v[i] for i in range(n)]
             break
-    sim = simple_roots(M, roots, dir)
+    sim = imat(simple_roots(M, roots, dir))
     A = M.batch_prod(sim, sim)
     graph = {i: [j for j in range(len(sim)) if A[i][j] != 0] for i in range(len(sim))}
     order = order_vert(graph, list(graph.keys()))
-    sim = [sim[i] for i in order]
+    sim = imat([sim[i] for i in order])
     A = M.batch_prod(sim, sim)
-    return Lattice(len(sim), A)
+    return Lattice(sim.shape[0], A)
 
 

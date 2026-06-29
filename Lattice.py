@@ -1,23 +1,24 @@
 from __future__ import annotations
-import math
-import numpy as np
-import sympy as sp
+from Commons import *
 from hsnf import smith_normal_form
-import flint as fl
 from typing import List, Tuple
 
 
-
 class Lattice:
-    def __init__(self, rank: int, prod: List[List[int]]):
+    
+    def __init__(self, rank: int, prod: List[List[int]] | IMat):
         self.rank = rank
-        self.A = fl.fmpz_mat(prod)
+        if type(prod) is IMat:
+            self.A = prod.copy()
+        else:
+            self.A = imat(prod)
+        self.A_fl = imat2flz(self.A)
         
-        if self.A.det() == 0:
+        if self.A_fl.det() == 0:
             raise ValueError("Gram matrix must be non-degenerate.")
-        if self.A.nrows() != self.rank or self.A.ncols() != self.rank:
+        if self.A_fl.nrows() != self.rank or self.A_fl.ncols() != self.rank:
             raise ValueError("Gram matrix dimensions must match the specified rank.")
-        if self.A.transpose() != self.A:
+        if self.A_fl.transpose() != self.A_fl:
             raise ValueError("Gram matrix must be symmetric.")
             
         self._compute_exponent()
@@ -27,21 +28,20 @@ class Lattice:
         self._snf_R = None
         
     def _compute_exponent(self) -> None:
-        B = self.A.snf()
+        B = self.A_fl.snf()
         self.dgroup = [int(B[i, i]) for i in range(self.rank)]
-        self.disc = self.A.det()
+        self.disc = int(self.A_fl.det())
         self.exp = max(self.dgroup)
 
     def _compute_snf(self) -> None:
         if self._snf_L_inv is not None:
             return
-        M = np.array(self.A.tolist(), dtype=object)
-        # L * M * R = D
-        D, L, R = smith_normal_form(M)
-        L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
+        # L * A * R = D
+        D, L, R = smith_normal_form(self.A)
+        L_inv, _ = imat2flz(L).inv().numer_denom()
         self._snf_L_inv = L_inv
-        self._snf_D = fl.fmpz_mat(D.tolist())
-        self._snf_R = fl.fmpz_mat(R.tolist())
+        self._snf_D = imat2flz(D)
+        self._snf_R = imat2flz(R)
 
     def _init_basis(self) -> None:
         """Uses sympy to compute the signature of the lattice via a symbolic computation
@@ -56,20 +56,6 @@ class Lattice:
             n_pos = sum(eival[a] for a in eival if sp.N(a, 50).as_real_imag()[0] > 0)
         self.signature = (n_pos, self.rank - n_pos)
         self.parity = any(self.A[i, i] % 2 for i in range(self.rank))
-        # # Convert to float64 safely for np.linalg
-        # A_float = np.array(self.A.tolist(), dtype=np.float64)
-        # eival, eivec = np.linalg.eigh(A_float)
-        
-        # # Sort descending to group positive eigenvalues first
-        # idx = np.argsort(eival)[::-1]
-        # eival = eival[idx]
-        # eivec = eivec[:, idx]
-        
-        # pos_count = np.sum(eival > 0)
-        # self.signature = (int(pos_count), self.rank - int(pos_count))
-        
-        # eival_abs = np.sqrt(np.abs(eival))
-        # self.norm_basis = eivec / eival_abs
 
     def __add__(self, other: Lattice) -> Lattice:
         """Computes the orthogonal direct sum of two lattices."""
@@ -95,8 +81,7 @@ class Lattice:
     
     def __call__(self, d: int) -> Lattice:
         """Scales the quadratic form by a constant d."""
-        A_scaled = (self.A * d).tolist()
-        return Lattice(self.rank, A_scaled)
+        return Lattice(self.rank, self.A * d)
 
     def info(self) -> str:
         if self.signature == (0, 0):
@@ -116,7 +101,7 @@ class Lattice:
         and FLINT for the integer lattice operations.
         """
         # 1. Convert to float for spectral decomposition
-        A_float = np.array(self.A.tolist(), dtype=np.float64)
+        A_float = np.array(self.A, dtype=np.float64)
         
         # 2. Build the positive-definite majorant (M)
         eival, eivec = np.linalg.eigh(A_float)
@@ -141,7 +126,7 @@ class Lattice:
         
         # 7. Apply the transformation to the ORIGINAL exact indefinite Gram matrix
         # The new Gram matrix is U * A * U^T
-        B = U * self.A * U.transpose()
+        B = U * self.A_fl * U.transpose()
         return B.tolist()
 
     def _lll_indefinite_sp(self, precision = 50, rescale = 1e15) -> None:
@@ -165,118 +150,114 @@ class Lattice:
         _, U = B.lll_transform()
         return [[int(x) for x in row] for row in (U * A_sp * U.transpose()).tolist()]
         
-    def lll(self) -> List[List[int]]:
+    def lll(self) -> IMat:
         """Returns the LLL-reduced Gram matrix. In the case of an indefinite lattice,
         uses a positive-definite majorant."""
         match self.signature:
             case (self.rank, 0):
-                return self.A.lll(rep='gram').tolist()
+                return flz2imat(self.A_fl.lll(rep='gram'))
             case (0, self.rank):
-                return (-self.A).lll(rep='gram').tolist()
+                return flz2imat((-self.A_fl).lll(rep='gram'))
             case _:
                 return self._lll_indefinite_np()
         
-    def product(self, u: List[int], v: List[int]) -> int:
-        return (fl.fmpz_mat(1, self.rank, u) * self.A * fl.fmpz_mat(self.rank, 1, v))[0, 0]
+    def product(self, u: List[int] | IMat, v: List[int] | IMat) -> int:
+        try:
+            x = int(imat(u) @ self.A @ imat(v).transpose())
+        except:
+            x = (imat(u) @ self.A @ imat(v).transpose()).flatten()[0]
+        return x
     
-    def batch_prod(self, u: List[List[int]], v: List[List[int]]) -> List[List[int]]:
-        return (fl.fmpz_mat(u) * self.A * fl.fmpz_mat(v).transpose()).tolist()
+    def batch_prod(self, u: IMat, v: IMat) -> IMat:
+        return u @ self.A @ v.transpose()
 
-    def square(self, u: List[int]) -> int:
+    def square(self, u: List[int] | IMat) -> int:
         return self.product(u, u)
     
-    def is_root(self, u: List[int]) -> bool:
+    def is_root(self, u: List[int] | IMat) -> bool:
         """Checks if u is a root, i.e. if the reflection in u preserves the lattice."""
         norm_sq = self.square(u)
         if norm_sq == 0:
             return False
-        umat = fl.fmpz_mat(1, self.rank, u)
-        v = umat * self.A
-        d = 2 * math.gcd(*v.tolist()[0])
+        v = u @ self.A
+        d = 2 * math.gcd(*v.tolist())
         return d % norm_sq == 0
 
     @staticmethod
-    def saturate(gens: List[List[int]]) -> List[List[int]]:
+    def saturate(gens: List[List[int]] | IMat) -> IMat:
         """Given a set of generators for a sublattice, returns a basis for the saturated sublattice
         spanned by the generators."""
-        rank = len(gens[0])
-        H, T = fl.fmpz_mat(gens).transpose().hnf(transform=True)
-        B, _denom = T.inv().numer_denom() # T in GL(n, Z), so denom is 1
+        M = imat2flz(gens)
+        H, T = M.transpose().hnf(transform=True)
+        B, _ = T.inv().numer_denom() # T in GL(n, Z), so denom is 1
         # Finds number of rows in H that are not entirely zero
-        H_len = min(len(gens), rank)
+        H_len = min(len(gens), M.ncols())
         num_independent = sum(1 for i in range(H_len) if any(H[i, j] != 0 for j in range(H_len)))
-        B_transposed = B.transpose().tolist()
-        return [B_transposed[i] for i in range(num_independent)]
+        B_tr = flz2imat(B.transpose())
+        return B_tr[:num_independent, :]
     
     @staticmethod
-    def index(gens: List[List[int]]) -> int:
+    def index(gens: List[List[int]] | IMat) -> int:
         """Given a set of generators for a sublattice, returns the index of the sublattice
         spanned by the generators."""
-        S = fl.fmpz_mat(gens).snf()
-        return math.prod([S[i, i] for i in range(len(gens)) if S[i, i] != 0])
+        S = imat2flz(gens).snf()
+        return math.prod([int(S[i, i]) for i in range(len(gens)) if S[i, i] != 0])
     
     @staticmethod
-    def fibre_product(A1: list[list[int]], A2: list[list[int]]) -> list[list[int]]:
-        n1 = len(A1)
-        n2 = len(A2)
+    def fibre_product(A1: List[List[int]] | IMat, A2: List[List[int]] | IMat) -> tuple[IMat, IMat]:
+        n1 = nrows(A1)
+        n2 = nrows(A2)
         if n1 == 0 or n2 == 0:
             return []
-        M = fl.fmpz_mat(A1 + A2).transpose()
+        M = imat2flz(concat_rows(A1, A2)).transpose()
         K, r = M.nullspace()
-        _H, T = K.hnf(transform=True)
-        B, _denom = T.inv().numer_denom()
+        _, T = K.hnf(transform=True)
+        B, _ = T.inv().numer_denom()
         C = B.transpose().tolist()[:r]
-        return [v[:n1] for v in C], [v[n1 : n1 + n2] for v in C]
+        return imat([v[:n1] for v in C]), imat([v[n1 : n1 + n2] for v in C])
 
     @staticmethod
-    def image(A: list[list[int]]) -> list[list[int]]:
+    def image(A: List[List[int]] | IMat) -> IMat:
         """Given a matrix A, returns a basis for the Z-span of its rows."""
-        L = fl.fmpz_mat(A)
+        L = imat2flz(A)
         B = L * L.transpose()
         H, T = B.hnf(transform=True)
-        rank = sum(1 for i in range(len(A)) if any(H[i, j] != 0 for j in range(len(A))))
-        return (T * L).tolist()[:rank]
-        # M = np.array(A, dtype=object).transpose()
-        # D, L, _R = smith_normal_form(M)
-        # L_inv, _denom = fl.fmpz_mat(L.tolist()).inv().numer_denom()
-        # n = min(M.shape)
-        # r = sum(1 for i in range(n) if D[i, i] != 0)
-        # T_list = (L_inv * fl.fmpz_mat(D.tolist())).transpose().tolist()
-        # return [T_list[i] for i in range(r)]
+        rank = sum(1 for i in range(L.nrows()) if any(H[i, j] != 0 for j in range(L.nrows())))
+        return imat((T * L).tolist()[:rank])
     
-    def complement(self, gens: List[List[int]]) -> List[List[int]]:
+    def complement(self, gens: List[List[int]] | IMat) -> IMat:
         """Given a set of generators for a sublattice, returns a basis for its orthogonal complement."""
-        G = fl.fmpz_mat(gens) * self.A
+        G = imat2flz(gens) * self.A_fl
         K, n = G.nullspace()
-        return self.saturate(K.transpose().tolist()[:n])
+        return self.saturate(imat(K.transpose().tolist()[:n]))
     
-    def subquotient(self, gens: List[List[int]]) -> List[List[int]]:
+    def subquotient(self, gens: List[List[int]] | IMat) -> IMat:
         """Given a set of generators for a sublattice L, returns a basis for the lattice
         that represents the quotient of L by the kernel of the quadratic form induced on L."""
-        L = fl.fmpz_mat(gens)
-        B = L * self.A * L.transpose()
+        L = imat2flz(gens)
+        B = L * self.A_fl * L.transpose()
         H, T = B.hnf(transform=True)
-        rank = sum(1 for i in range(len(gens)) if any(H[i, j] != 0 for j in range(len(gens))))
-        return (T * L).tolist()[:rank]
+        rank = sum(1 for i in range(L.nrows()) if any(H[i, j] != 0 for j in range(L.nrows())))
+        return imat((T * L).tolist()[:rank])
     
-    def even_sublattice(self) -> List[List[int]]:
+    def even_sublattice(self) -> IMat:
         """Returns a basis for the biggest even sublattice of the lattice."""
         if self.parity:
-            basis, _ = self.fibre_product([[self.A[i, i] % 2] for i in range(self.rank)], [[2]])
+            basis, _ = self.fibre_product(imat([[self.A[i, i] % 2] for i in range(self.rank)]), imat([[2]]))
             return basis
         else:
-            return [[int(i == j) for i in range(self.rank)] for j in range(self.rank)]
+            return imat_diag([1] * self.rank)
 
-    def dual_vec(self, u: List[int]) -> Tuple[List[int], int]:
+    def dual_vec(self, u: List[int] | IMat) -> Tuple[IMat, int]:
         """Given a vector u, finds its divisibility d in the dual lattice and a vector v, such that (u, v) = d.
         Returns the pair (v, d)."""
-        B = self.A * fl.fmpz_mat(self.rank, 1, u)
+        B = self.A_fl * imat2flz(u).transpose()
         H, T = B.hnf(transform=True)
-        return T.tolist()[0], int(H[0, 0])
+        return imat(T.tolist()[0]), int(H[0, 0])
     
     def make_primitive(self) -> Lattice:
         d = math.gcd(*self.dgroup)
-        return Lattice(self.rank, [[a // d for a in row] for row in self.A.tolist()]) if d > 1 else self
+        return Lattice(self.rank, self.A // d) if d > 1 else self
     
     def clear_squares(self) -> Lattice:
         """Returns the square-free overlattice of the lattice"""
@@ -290,7 +271,7 @@ class Lattice:
         D0 = fl.fmpz_mat(self._snf_D)
         for i in range(self.rank):
             D0[i, i] = max_square(self._snf_D[i, i])
-        new_A, _ = (D0.inv() * self._snf_R.transpose() * self.A * self._snf_R * D0.inv()).numer_denom()
+        new_A, _ = (D0.inv() * self._snf_R.transpose() * self.A_fl * self._snf_R * D0.inv()).numer_denom()
         return Lattice(self.rank, new_A.tolist())
     
     def make_ssf(self) -> Lattice:

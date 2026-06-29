@@ -46,16 +46,14 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-# rank = 3
-# L = Lattice(rank, [[1 - 2 * int(i == j) for j in range(rank)] for i in range(rank)])
-# base = [1] * rank
+CheckAllcock()
 
-
-# RenderChamber(L, walls, 'chamber')
-
-# V = Vinberg(L, base=[3, 4, -3], h_batch=10, fps_batch=10000)
+# rank = 22
+# L = D_lat(20)(-1) + U_lat()
+# base = [0] * 20 + [1, 1]
+# V = Vinberg(L, base=base, h_batch=1, fps_batch=10000)
 # V.print_info()
-# walls = V.run(max_iterations=50)
+# walls = V.run(max_iterations=5)
 # for w in walls:
 #     print(w, L.square(w))
 # rays, lines = get_extremal_rays(walls, L.A)
