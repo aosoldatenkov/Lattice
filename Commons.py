@@ -2,7 +2,7 @@ import math
 import numpy as np
 import sympy as sp
 import flint as fl
-from typing import List
+from typing import List, Tuple
 
 IMat = np.ndarray
 
@@ -50,7 +50,7 @@ def list_rows(m: List[List[int]] | IMat) -> List[IMat]:
         return [m]
     return [m[i, :] for i in range(m.shape[0])]
 
-def euclid(a, b):
+def euclid(a: int, b: int) -> Tuple[int, int, int, int, int]:
     """Transforms the 1x2 matrix (a, b) with integral entries into
     the standard form (c, 0), where c is the GCD of a, b.
     Returns the tuple (c, x, y, z, w) representing the corresponding

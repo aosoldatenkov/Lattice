@@ -22,7 +22,6 @@ Thumbs.db
 # --- Auxiliary files ---
 Eigen/
 output/
-run.ipynb
 *.so
 fp_search__.cpp
 old.py

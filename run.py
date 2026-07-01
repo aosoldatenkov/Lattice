@@ -46,8 +46,6 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-CheckAllcock()
-
 # rank = 22
 # L = D_lat(20)(-1) + U_lat()
 # base = [0] * 20 + [1, 1]
@@ -124,8 +122,9 @@ CheckAllcock()
 # end = time.perf_counter()
 # print("Total execution time: " + str(datetime.timedelta(seconds=(end - start))))
 
-# M = Leech_lat()
-# print(M.A)
+# M = Leech_lat_alt()
+# A = M.lll()
+# L = Lattice(24, A)
 # FPS = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, 4.5)
 # vecs = FPS.search_all()
 # print(len(vecs))

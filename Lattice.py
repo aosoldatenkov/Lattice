@@ -12,6 +12,8 @@ class Lattice:
             self.A = prod.copy()
         else:
             self.A = imat(prod)
+        if rank == 1 and self.A.ndim < 2:
+            self.A = imat([[self.A[0]]])
         self.A_fl = imat2flz(self.A)
         
         if self.A_fl.det() == 0:
@@ -55,7 +57,7 @@ class Lattice:
         except:
             n_pos = sum(eival[a] for a in eival if sp.N(a, 50).as_real_imag()[0] > 0)
         self.signature = (n_pos, self.rank - n_pos)
-        self.parity = any(self.A[i, i] % 2 for i in range(self.rank))
+        self.parity = any(self.A_fl[i, i] % 2 for i in range(self.rank))
 
     def __add__(self, other: Lattice) -> Lattice:
         """Computes the orthogonal direct sum of two lattices."""
@@ -93,7 +95,7 @@ class Lattice:
         ]
         return '\n'.join(lines)
     
-    def _lll_indefinite_np(self) -> None:
+    def _lll_indefinite_np(self, transform: bool = False) -> IMat | Tuple[IMat, IMat]:
         """
         Applies LLL reduction to an indefinite lattice
         using a positive-definite majorant metric.
@@ -127,7 +129,7 @@ class Lattice:
         # 7. Apply the transformation to the ORIGINAL exact indefinite Gram matrix
         # The new Gram matrix is U * A * U^T
         B = U * self.A_fl * U.transpose()
-        return B.tolist()
+        return flz2imat(B) if not transform else (flz2imat(B), flz2imat(U))
 
     def _lll_indefinite_sp(self, precision = 50, rescale = 1e15) -> None:
         """
@@ -150,22 +152,28 @@ class Lattice:
         _, U = B.lll_transform()
         return [[int(x) for x in row] for row in (U * A_sp * U.transpose()).tolist()]
         
-    def lll(self) -> IMat:
+    def lll(self, transform: bool = False) -> IMat | Tuple[IMat, IMat]:
         """Returns the LLL-reduced Gram matrix. In the case of an indefinite lattice,
         uses a positive-definite majorant."""
         match self.signature:
             case (self.rank, 0):
+                if transform:
+                    M, T = self.A_fl.lll(transform=True, rep='gram')
+                    return flz2imat(M), flz2imat(T)
                 return flz2imat(self.A_fl.lll(rep='gram'))
             case (0, self.rank):
+                if transform:
+                    M, T = (-self.A_fl).lll(transform=True, rep='gram')
+                    return flz2imat(M), flz2imat(T)
                 return flz2imat((-self.A_fl).lll(rep='gram'))
             case _:
                 return self._lll_indefinite_np()
         
     def product(self, u: List[int] | IMat, v: List[int] | IMat) -> int:
         try:
-            x = int(imat(u) @ self.A @ imat(v).transpose())
+            x = int(np.dot(imat(u) @ self.A, imat(v)))
         except:
-            x = (imat(u) @ self.A @ imat(v).transpose()).flatten()[0]
+            x = (np.dot(imat(u) @ self.A, imat(v))).flatten()[0]
         return x
     
     def batch_prod(self, u: IMat, v: IMat) -> IMat:
