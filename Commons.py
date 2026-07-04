@@ -50,6 +50,11 @@ def list_rows(m: List[List[int]] | IMat) -> List[IMat]:
         return [m]
     return [m[i, :] for i in range(m.shape[0])]
 
+def inv2x2(m: List[List[int]] | IMat) -> IMat:
+    m = imat(m)
+    det = m[0, 0] * m[1, 1] - m[0, 1] * m[1, 0]
+    return imat([[m[1, 1], -m[0, 1]], [-m[1, 0], m[0, 0]]]), det
+
 def euclid(a: int, b: int) -> Tuple[int, int, int, int, int]:
     """Transforms the 1x2 matrix (a, b) with integral entries into
     the standard form (c, 0), where c is the GCD of a, b.

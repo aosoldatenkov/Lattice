@@ -171,9 +171,9 @@ class Lattice:
         
     def product(self, u: List[int] | IMat, v: List[int] | IMat) -> int:
         try:
-            x = int(np.dot(imat(u) @ self.A, imat(v)))
+            x = int(imat(u) @ self.A @ imat(v).transpose())
         except:
-            x = (np.dot(imat(u) @ self.A, imat(v))).flatten()[0]
+            x = int((imat(u) @ self.A @ imat(v).transpose()).flatten()[0])
         return x
     
     def batch_prod(self, u: IMat, v: IMat) -> IMat:

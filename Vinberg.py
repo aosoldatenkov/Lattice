@@ -1,4 +1,4 @@
-from collections import defaultdict
+from fractions import Fraction
 from Commons import *
 from Lattice import *
 from LatticeUtils import *
@@ -34,6 +34,8 @@ class Vinberg:
         B, _ = imat2flz(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
         self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (imat2flz(self.base) * B).tolist()[0], 2.1 * self.M.exp + 0.5, self.h_batch, True, True)
+        self.base_walls = [imat(w) @ self.basis for w in self.VS.get_walls()]
+        self.active_walls = [(w, 0) for w in self.base_walls]
         # self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
     def list_bases(self, n):
@@ -67,26 +69,53 @@ class Vinberg:
         # B = fl.fmpz_mat(self.basis)
         # print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
-    def run(self, root_batch = 1000, max_iterations = 50000):
+    def run(self, root_batch = 1000, iterations = 1):
         count = 0
         while True:
             count += 1
-            if count > max_iterations:
-                print("\nReached the maximum number of iterations")
-                walls = imat(self.VS.get_walls())
-                return list_rows(walls @ self.basis)
+            if count > iterations:
+                return [w[0] for w in self.active_walls]
             self.VS.run(root_batch, self.fps_batch)
             self.VS.update_walls()
-            walls = self.VS.get_walls()
-            # self.VS.run(root_batch=root_batch, use_reflections=self.use_reflections)
-            # walls = self.VS.R.sroots + sum(self.VS.walls.values(), start=[])
-            # walls = [[int(x) for x in w.tolist()[0]] for w in walls]
-            print(f"Iteration {count}; {len(walls)} walls", end='\r')
-            if len(walls) == 0:
+            walls = imat(self.VS.get_walls())
+            self.update_walls(list_rows(walls @ self.basis))
+            print(f"Iteration {count}; {len(self.active_walls)} active walls", end='\r')
+            if self.update_rays():
+                print("\nThe fundamental domain has finite volume")
+                return [w[0] for w in self.active_walls]
+
+    def update_rays(self):
+        if len(self.active_walls) == 0:
+            return
+        self.rays, self.lines = get_extremal_rays([w[0] for w in self.active_walls], self.L.A)
+        if len(self.lines) == 0:
+            squares = [(ray * self.L.A_fl * ray.transpose())[0, 0] for ray in self.rays]
+            if all(x >= 0 for x in squares):
+                return True
+        return False
+                
+    def update_walls(self, new_walls):
+        wall_list = []
+        for w in new_walls:
+            if not self.L.is_root(w):
                 continue
-            rays, lines = get_extremal_rays(walls, self.M.A)
-            if len(lines) == 0:
-                squares = [(ray * self.M.A_fl * ray.transpose())[0, 0] for ray in rays]
-                if all(x >= 0 for x in squares):
-                    print("\nThe fundamental domain has finite volume")
-                    return list_rows(walls @ self.basis)
+            p = self.L.product(w, self.base)
+            if p == 0:
+                continue
+            if p < 0:
+                w, p = -w, -p
+            q = self.L.square(w)
+            if q >= 0:
+                continue
+            wall_list.append((imat(w), Fraction(p * p, -q)))
+        wall_list.extend([w for w in self.active_walls if w[1] > 0])
+        wall_list.sort(key=lambda w: w[1])
+        self.active_walls = [(w, 0) for w in self.base_walls]
+        for w in wall_list:
+            active = True
+            for v in self.active_walls:
+                if self.L.product(w[0], v[0]) < 0:
+                    active = False
+                    break
+            if active:
+                self.active_walls.append(w)

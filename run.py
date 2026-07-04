@@ -46,6 +46,8 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
+CheckAllcock()
+
 # rank = 22
 # L = D_lat(20)(-1) + U_lat()
 # base = [0] * 20 + [1, 1]

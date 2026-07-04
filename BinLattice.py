@@ -1,8 +1,7 @@
-import math
+from Commons import *
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterator, Any
-from IntVectors import int_seq
+from typing import Tuple, List, Optional, Dict, Set, Any
 
 @dataclass
 class BinBasis:
@@ -34,6 +33,9 @@ class BinBasis:
 
     def sum(self) -> Tuple[Any, Any]:
         return (self.e[0] + self.f[0], self.e[1] + self.f[1])
+    
+    def imat(self) -> IMat:
+        return imat([self.e, self.f])
 
 
 class BinLattice:
@@ -42,6 +44,8 @@ class BinLattice:
         self.b = b
         self.h = h
         self.disc = a * b - h * h  # Determinant of the form
+        self.exp = self.disc // math.gcd(a, b, h)
+        self.A = imat([[a, h], [h, b]])
         
         self.zero: List[Tuple[Any, Any]] = []
         self.river: List[BinBasis] = []
@@ -189,19 +193,22 @@ class BinLattice:
             b2_neg = BinBasis(s2, bas2.f, 0, bas2.b, self.prod(s2, bas2.f))
             self.neg = [b1_neg.copy() if b1_neg.h < 0 else b1_neg.flip(), 
                         b2_neg.copy() if b2_neg.h < 0 else b2_neg.flip()]
+            self.shift = None
         else:
             nmin = min(range(len(river)), key=river.__getitem__)
             self.can = river[nmin].copy() if river[nmin].h > 0 else river[nmin].flip()
             self.river = self.flow(self.can)
             river.append(self.flow(river[-1])[1])
             
-            e0, e1 = river[0].e
-            f0, f1 = river[0].f
-            E0, E1 = river[-1].e
-            F0, F1 = river[-1].f
-            det = e0 * f1 - e1 * f0
-            self.shift = (det * (E0 * f1 - F0 * e1), det * (-E0 * f0 + F0 * e0), 
-                          det * (E1 * f1 - F1 * e1), det * (-E1 * f0 + F1 * e0))
+            Ainv, det = inv2x2(river[0].imat()) # The determinant is 1 or -1
+            self.shift = det * Ainv @ river[-1].imat()
+            # e0, e1 = river[0].e
+            # f0, f1 = river[0].f
+            # E0, E1 = river[-1].e
+            # F0, F1 = river[-1].f
+            # det = e0 * f1 - e1 * f0
+            # self.shift = (det * (E0 * f1 - F0 * e1), det * (-E0 * f0 + F0 * e0), 
+            #               det * (E1 * f1 - F1 * e1), det * (-E1 * f0 + F1 * e0))
 
         for r1, r2 in zip(river[:-1], river[1:]):
             if r1.e != r2.e:
@@ -351,6 +358,7 @@ class BinLattice:
                 e, f = triple[0][1], triple[1][1]
                 return BinBasis(e, f, self.sqr(e), self.sqr(f), self.prod(e, f))
                 
+        bn = BinBasis(bn.e, bn.f, self.sqr(bn.e), self.sqr(bn.f), self.prod(bn.e, bn.f))
         if bn.a * bn.b == 0:
             return bn if bn.a == 0 else bn.swap()
         return bn if bn.a > 0 else bn.swap()

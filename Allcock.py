@@ -2,7 +2,7 @@ import re
 import time
 import datetime
 from Commons import *
-from BinLattice import BinLattice, int_seq
+from BinLattice import *
 from Lattice import *
 from LatticeUtils import *
 from IntVectors import *
@@ -133,7 +133,7 @@ def CheckAllcock():
             print(L.A)
             V = Vinberg(L, h_batch=100)
             V.print_info()
-            walls = V.run(root_batch=1000000)
+            walls = V.run(root_batch=1000000, iterations=50000)
             lend = time.perf_counter()
             print("Vinberg's algorithm execution time: " + str(datetime.timedelta(seconds=(lend - lstart))))
             for w in walls:
