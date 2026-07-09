@@ -10,14 +10,14 @@ import vsearch_cpp
 
 class Vinberg:
 
-    def __init__(self, L: Lattice, base: list[int] | IMat = None, h_batch: int = 3, fps_batch: int = 10 ** 3):
-        # The lattice L should be of signature (1, n)
-        if L.signature[0] != 1:
-            raise ValueError("The lattice should be of signature (1, n)")
+    def __init__(self, L: Lattice, base: list[int] | IMat = None, chamber: list[int] | IMat = None, h_batch: int = 3, fps_batch: int = 10 ** 3):
+        # The lattice L should be of signature (1, n) with n > 0
+        if L.signature[0] != 1 or L.signature[1] == 0:
+            raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L
         self.h_batch = h_batch
         self.fps_batch = fps_batch
-        if base != None and L.square(base) > 0:
+        if base is not None and L.square(base) > 0:
             base = imat(base)
             gcd = math.gcd(*base.tolist())
             self.base = base // gcd
@@ -28,13 +28,16 @@ class Vinberg:
             b = sorted(self.list_bases(1), key=lambda x: x[0])
             self.base = b[0][1]
             self.basis = b[0][2]
+        self.chamber = imat(chamber) if chamber is not None else imat_zero(1, L.rank)
         self._init_basis()
 
     def _init_basis(self):
         B, _ = imat2flz(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
-        self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (imat2flz(self.base) * B).tolist()[0], 2.1 * self.M.exp + 0.5, self.h_batch, True, True)
+        self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (imat2flz(self.base) * B).tolist()[0], (imat2flz(self.chamber) * B).tolist()[0],
+                                         2.1 * self.M.exp + 0.5, self.h_batch, True, True)
         self.base_walls = [imat(w) @ self.basis for w in self.VS.get_walls()]
+        self.base_walls.sort(key = lambda x: self.L.product(x, self.chamber))
         self.active_walls = [(w, 0) for w in self.base_walls]
         # self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
@@ -74,6 +77,7 @@ class Vinberg:
         while True:
             count += 1
             if count > iterations:
+                print("\nReached the maximal number of iterations")
                 return [w[0] for w in self.active_walls]
             self.VS.run(root_batch, self.fps_batch)
             self.VS.update_walls()

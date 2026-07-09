@@ -455,7 +455,7 @@ private:
     }
 
 public:
-    VSearchCpp(MatrixXi64 A_in, RowVectorXi64 base_in, double bound_in, int num_threads_in, bool chamber_mode_in, bool only_roots_in) :
+    VSearchCpp(MatrixXi64 A_in, RowVectorXi64 base_in, RowVectorXi64 chamber_in, double bound_in, int num_threads_in, bool chamber_mode_in, bool only_roots_in) :
                 A(std::move(A_in)), base(std::move(base_in)), rank(A.rows()), bound(bound_in), num_threads(num_threads_in),
                 chamber_mode(chamber_mode_in), only_roots(only_roots_in), h_counter(-1) {
         if (num_threads <= 0) num_threads = std::thread::hardware_concurrency();
@@ -472,7 +472,7 @@ public:
             throw std::runtime_error("Error initializing basis: s is non-positive");
         }
         
-        init_chamber(RowVectorXi64::Zero(rank - 1));
+        init_chamber(chamber_in);
     }
 
     void init_chamber(RowVectorXi64 base) {
@@ -638,12 +638,14 @@ PYBIND11_MODULE(vsearch_cpp, m) {
     py::class_<VSearchCpp>(m, "VSearchCpp")
         .def(py::init([](const std::vector<std::vector<int_class>>& A_in,
                          const std::vector<int_class>& base_in,
+                         const std::vector<int_class>& chamber_in,
                          const double bound_in,
                          const int num_threads_in,
                          const bool chamber_mode_in,
                          const bool only_roots_in) {
-            return std::make_unique<VSearchCpp>(to_matrix(A_in), to_row_vector(base_in), bound_in, num_threads_in, chamber_mode_in, only_roots_in);
-        }), py::arg("A"), py::arg("base"), py::arg("bound"), py::arg("num_threads") = 1, py::arg("chamber_mode") = true, py::arg("only_roots") = true)
+            return std::make_unique<VSearchCpp>(to_matrix(A_in), to_row_vector(base_in), to_row_vector(chamber_in),
+                                                bound_in, num_threads_in, chamber_mode_in, only_roots_in);
+        }), py::arg("A"), py::arg("base"), py::arg("chamber"), py::arg("bound"), py::arg("num_threads") = 1, py::arg("chamber_mode") = true, py::arg("only_roots") = true)
 
         .def("init_chamber", [](VSearchCpp& self, const std::vector<int_class>& base) {
             self.init_chamber(to_row_vector(base));

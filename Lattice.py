@@ -32,7 +32,7 @@ class Lattice:
     def _compute_exponent(self) -> None:
         B = self.A_fl.snf()
         self.dgroup = [int(B[i, i]) for i in range(self.rank)]
-        self.disc = int(self.A_fl.det())
+        self.disc = abs(int(self.A_fl.det()))
         self.exp = max(self.dgroup)
 
     def _compute_snf(self) -> None:
