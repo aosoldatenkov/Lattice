@@ -15,6 +15,7 @@ from VSearch import *
 from Allcock import *
 from Circle import *
 from ReflectiveTests import *
+from Genus import *
 import fp_search_cpp
 import vsearch_cpp
 
@@ -45,21 +46,25 @@ def TestReflections():
             break
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
+        
 
+L = D_lat(20)
+G = Genus(L)
+print(G.str())
 
-G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-          [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-          [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-          [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-          [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
-gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
-for v in product(range(2), repeat=5):
-    gens.append([x % 2 for x in (imat(v) @ G).tolist()])
-basis = Lattice.image(imat(gens))
-K = Lattice(16, basis @ basis.transpose() // 2)
-L = U_lat() + K(-1)
-print(L.info())
-RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=2)
+# G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+#           [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+#           [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+#           [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
+# gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
+# for v in product(range(2), repeat=5):
+#     gens.append([x % 2 for x in (imat(v) @ G).tolist()])
+# basis = Lattice.image(imat(gens))
+# K = Lattice(16, basis @ basis.transpose() // 2)
+# L = U_lat() + K(-1)
+# print(L.info())
+# RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=2)
 
 # rank = 22
 # L = D_lat(20)(-1) + U_lat()
