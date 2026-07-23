@@ -1,0 +1,33 @@
+[project]
+name = "lattice"
+version = "0.1.0"
+description = "Computational toolkit for integral lattices, genus theory, and Vinberg's algorithm for hyperbolic reflection groups"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5",
+    "sympy>=1.14",
+    "python-flint>=0.8",
+    "hsnf>=0.4",
+    "matplotlib>=3.11",
+    "pycddlib>=3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pybind11>=3.0",
+    "ipykernel>=7.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+# Research/math code: single-letter variable names (A, L, M, U, ...) and
+# `from X import *` star-imports across the flat module layout are
+# intentional, not lint violations.
+select = ["E", "F", "W"]
+ignore = ["E741", "F403", "F405"]
