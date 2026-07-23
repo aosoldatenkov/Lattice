@@ -28,19 +28,20 @@ class Genus:
             b = other.sym[p]
             if sorted(a.keys()) != sorted(b.keys()):
                 return False
-            signdif = [e for e in a.keys() if a[e].sign != b[e].sign]
-            dimdif = [e for e in a.keys() if a[e].dim != b[e].dim]
-            if p > 2 and (len(signdif) > 0 or len(dimdif) > 0):
+            if any([a[e].dim != b[e].dim for e in a.keys()]):
+                return False
+            signdiff = [e for e in a.keys() if a[e].sign != b[e].sign]
+            if p > 2 and len(signdiff) > 0:
                 return False
             if p == 2:
-                if len(signdif) % 2 != 0:
+                if len(signdiff) % 2 != 0:
                     return False
                 if any([a[e].type != b[e].type for e in a.keys()]):
                     return False
-                typeII = [e for e in a.keys() if a[e].type == 'II']
+                typeII = [e for e in a.keys() if a[e].type == 'II'] + [e for e in range(max(a.keys()) + 2) if e not in a.keys()]
                 for m in typeII:
                     lhs = sum([a[e].tr - b[e].tr for e in range(m) if e in a.keys()])
-                    rhs = 4 * sum([min(x, m) for x in signdif], start=0)
+                    rhs = 4 * sum([min(x, m) for x in signdiff], start=0)
                     if (rhs - lhs) % 8 != 0:
                         return False
         return True
@@ -71,8 +72,9 @@ class Genus:
         if r == 0:
             return {}
         if p == 2:
-            e = max(e, 2)
-        q = p ** (e + 1)
+            q = p ** (e + 3)
+        else:
+            q = p ** (e + 1)
         scale = 0
         R = M % p
         while not any(R.flatten().tolist()):
@@ -134,7 +136,7 @@ class Genus:
             if scale in s and s[scale].type == 'I':
                 s[scale] = Com2Adic('I', s[scale].tr, sign(det, 2) * s[scale].sign, s[scale].dim + 2)
             elif scale in s and s[scale].type == 'II':
-                s[scale] = Com2Adic('II', 0, sign(det, 2) * s[scale][2], s[scale][3] + 2)
+                s[scale] = Com2Adic('II', 0, sign(det, 2) * s[scale].sign, s[scale].dim + 2)
             else:
                 s[scale] = Com2Adic('II', 0, sign(det, 2), 2)
             return s
