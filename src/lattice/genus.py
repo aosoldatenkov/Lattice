@@ -1,11 +1,11 @@
 from __future__ import annotations
-from Lattice import *
-from Commons import *
 from itertools import product
 from collections import namedtuple
-from typing import Dict, Tuple
+from typing import Dict
 from sympy.ntheory import factorint
 from sympy.functions.combinatorial.numbers import legendre_symbol
+from lattice._matrix import IMat, imat, nrows, euclid
+from lattice.lattice import Lattice
 
 ComPAdic = namedtuple('ComPAdic', ['sign', 'dim'])
 Com2Adic = namedtuple('Com2Adic', ['type', 'tr', 'sign', 'dim'])

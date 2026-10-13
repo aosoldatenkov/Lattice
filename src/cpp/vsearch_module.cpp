@@ -14,7 +14,7 @@
 #include <cstdlib>
 #include <gmpxx.h>
 #include <iostream>
-#include "fp_search.cpp"
+#include "fp_search.hpp"
 
 namespace py = pybind11;
 

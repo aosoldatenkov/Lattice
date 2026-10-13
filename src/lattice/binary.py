@@ -1,7 +1,8 @@
-from Commons import *
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Any
+from lattice._matrix import IMat, imat, inv2x2
 
 @dataclass
 class BinBasis:
@@ -44,7 +45,8 @@ class BinLattice:
         self.b = b
         self.h = h
         self.disc = a * b - h * h  # Determinant of the form
-        self.exp = self.disc // math.gcd(a, b, h)
+        g = math.gcd(a, b, h)
+        self.exp = self.disc // g if g != 0 else 0  # The zero form has exponent 0
         self.A = imat([[a, h], [h, b]])
         
         self.zero: List[Tuple[Any, Any]] = []
@@ -385,3 +387,31 @@ class BinLattice:
                 break
                 
         return river
+
+
+def list_bin_lattices(max_d, signature=None, parity=None):
+    ll = defaultdict(list)
+    max_a = int(2. * math.sqrt(max_d) / math.sqrt(3)) + 1
+    if signature == None or signature == (1, 1):
+        # Listing the indefinite lattices that represent zero
+        max_h = int(math.sqrt(max_d)) + 1
+        for h, b in [(h, b) for h in range(1, max_h) for b in range(2 * h + 1)]:
+            if parity != None and b % 2 != parity:
+                continue
+            lat = BinLattice(0, b, h)
+            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
+                ll[lat.disc].append(lat)
+    # Listing the positive and the rest of the indefinite lattices
+    for a, h in [(a, h) for a in range(-max_a, max_a) for h in range(abs(a)) if a != 0]:
+        max_b = int((max_d + h * h) / abs(a)) + 1
+        for b in range(-max_b, max_b):
+            if abs(a * b - h * h) > max_d:
+                continue
+            if parity != None and (b % 2 != parity or a % 2 != parity):
+                continue
+            lat = BinLattice(a, b, h)
+            if signature != None and lat.signature != signature:
+                continue
+            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
+                ll[lat.disc].append(lat)
+    return ll

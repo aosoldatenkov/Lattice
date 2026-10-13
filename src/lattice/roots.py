@@ -1,40 +1,13 @@
-from Commons import *
-from IntVectors import *
-from Lattice import Lattice
-from BinLattice import BinLattice
+import random as rnd
+from fractions import Fraction
+from typing import List
+import numpy as np
+import flint as fl
 import cdd
 import cdd.gmp
-from fractions import Fraction
-import random as rnd
-import fp_search_cpp
-
-
-def list_bin_lattices(max_d, signature=None, parity=None):
-    ll = defaultdict(list)
-    max_a = int(2. * math.sqrt(max_d) / math.sqrt(3)) + 1
-    if signature == None or signature == (1, 1):
-        # Listing the indefinite lattices that represent zero
-        max_h = int(math.sqrt(max_d)) + 1
-        for h, b in [(h, b) for h in range(1, max_h) for b in range(2 * h + 1)]:
-            if parity != None and b % 2 != parity:
-                continue
-            lat = BinLattice(0, b, h)
-            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
-                ll[lat.disc].append(lat)
-    # Listing the positive and the rest of the indefinite lattices
-    for a, h in [(a, h) for a in range(-max_a, max_a) for h in range(abs(a)) if a != 0]:
-        max_b = int((max_d + h * h) / abs(a)) + 1
-        for b in range(-max_b, max_b):
-            if abs(a * b - h * h) > max_d:
-                continue
-            if parity != None and (b % 2 != parity or a % 2 != parity):
-                continue
-            lat = BinLattice(a, b, h)
-            if signature != None and lat.signature != signature:
-                continue
-            if all(lat.is_isomorphic(l) == False for l in ll[lat.disc]):
-                ll[lat.disc].append(lat)
-    return ll
+from lattice._matrix import IMat, imat, imat_diag, imat2flz, nrows
+from lattice.lattice import Lattice
+from lattice.enumeration import FPSearch
 
 
 def Coxeter_graph(L, roots):
@@ -78,7 +51,7 @@ def irred_decomp(L: Lattice):
         M = L
 
     ubound = float(max(M.A[i, i] for i in range(M.rank)))
-    fps = fp_search_cpp.FPSearch(np.array(M.A, dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
+    fps = FPSearch(np.array(M.A, dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
     vecs = [imat(v) for v in fps.search_all()]
     vecs.sort(key = lambda x: M.square(x))
     sublat = []
@@ -204,121 +177,3 @@ def majorant(A_matrix: np.ndarray) -> np.ndarray:
     # Reconstruct the matrix: M = Q * |Lambda| * Q^T
     M = eivec @ np.diag(eival_abs) @ eivec.T
     return M
-
-def A_lat(n):
-    I = Lattice(1, [[1]])
-    R = I * (n + 1)
-    E = imat([[int(i == j) - int(i == j + 1) for i in range(n + 1)] for j in range(n)])
-    A = R.batch_prod(E, E)
-    return Lattice(n, A)
-
-def B_lat(n):
-    I = Lattice(1, [[1]])
-    R = I * n
-    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[int(i == n - 1) for i in range(n)]])
-    A = R.batch_prod(E, E)
-    return Lattice(n, A)
-
-def C_lat(n):
-    I = Lattice(1, [[1]])
-    R = I * n
-    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[2 * int(i == n - 1) for i in range(n)]])
-    A = R.batch_prod(E, E)
-    return Lattice(n, A)
-
-def D_lat(n):
-    I = Lattice(1, [[1]])
-    R = I * n
-    E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
-        [[int(i == n - 1 or i == n - 2) for i in range(n)]])
-    A = R.batch_prod(E, E)
-    return Lattice(n, A)
-
-def E_lat(n):
-    if n == 4:
-        return A_lat(4)
-    elif n == 5:
-        return D_lat(5)
-    elif n not in [6, 7, 8]:
-        raise ValueError("n must be 6, 7, or 8")
-    A = A_lat(n - 1).A.tolist()
-    A = [[2, 0, 0, -1] + [0] * (n - 4)] + [[-int(i == 2)] + A[i] for i in range(n - 1)]
-    return Lattice(n, A)
-
-def U_lat(n = 1):
-    return Lattice(2, [[0, n], [n, 0]])
-
-def I_lat(p, q):
-    if p > 0 and q > 0:
-        return Lattice(1, [[1]]) * p + Lattice(1, [[-1]]) * q
-    elif p > 0 and  q <= 0:
-        return Lattice(1, [[1]]) * p
-    elif q > 0:
-        return Lattice(1, [[-1]]) * q
-    else:
-        raise ValueError("At least one of p or q must be positive.")
-
-
-def II_lat_n_1(n):
-    if (n - 1) % 8 != 0:
-        raise ValueError("n - 1 must be divisible by 8")
-    L = I_lat(n, 1)
-    basis = [[int(i == j) for j in range(n)] + [-1] for i in range(1, n)]
-    basis += [[0] * n + [2]]
-    basis += [[1] * n + [-1]]
-    A = L.batch_prod(imat(basis), imat(basis))
-    A[n][n - 1] //= 2
-    A[n - 1][n] //= 2
-    A[n][n] //= 4
-    return Lattice(n + 1, A)
-
-def Leech_lat():
-    M = II_lat_n_1(25)
-    v = [i + 1 for i in range(24)] + [185, 0]
-    compl = M.complement([v])
-    basis = M.subquotient(compl)
-    return Lattice(basis.shape[0], M.batch_prod(basis, basis))
-
-def Leech_lat_alt():
-    M = I_lat(24, 1)
-    v = [2 * i + 1 for i in range(1, 24)] + [51, 145]
-    basis = M.complement([v])
-    return Lattice(basis.shape[0], M.batch_prod(basis, basis))
-
-
-def E_lat_test(n):
-    if n == 4:
-        return A_lat(4)
-    elif n == 5:
-        return D_lat(5)
-    elif n not in [6, 7, 8]:
-        raise ValueError("n must be 6, 7, or 8")
-    n_roots = {6: 72, 7: 126, 8: 240}
-    I = Lattice(1, [[1]])
-    L = I(-1) + I * n
-    v = [-3] + [1] * n
-    compl = L.complement([v])
-    A = L.batch_prod(compl, compl)
-    M = Lattice(compl.shape[0], A)
-    M = Lattice(compl.shape[0], M.lll())
-    roots = []
-    for v in int_seq(n, nonzero=True):
-        if M.is_root(v):
-            roots.append(v)
-        if len(roots) == n_roots[n]:
-            break
-    for v in int_seq(n, nonzero=True):
-        if all(M.product([n + v[i] for i in range(n)], r) != 0 for r in roots):
-            dir = [n + v[i] for i in range(n)]
-            break
-    sim = imat(simple_roots(M, roots, dir))
-    A = M.batch_prod(sim, sim)
-    graph = {i: [j for j in range(len(sim)) if A[i][j] != 0] for i in range(len(sim))}
-    order = order_vert(graph, list(graph.keys()))
-    sim = imat([sim[i] for i in order])
-    A = M.batch_prod(sim, sim)
-    return Lattice(sim.shape[0], A)
-
-

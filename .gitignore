@@ -6,6 +6,8 @@ env/
 # --- Compiled Code ---
 __pycache__/
 *.pyc
+build/
+*.so
 
 # --- Secrets and Local Configs ---
 .env
@@ -20,12 +22,9 @@ Thumbs.db
 .idea/
 
 # --- Auxiliary files ---
-Eigen/
 output/
-*.so
 fp_search__.cpp
 old.py
-allcock
-out
-in
+data/*
+!data/README.md
 CLAUDE.md

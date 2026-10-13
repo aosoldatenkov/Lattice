@@ -1,3 +1,7 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=3.0"]
+build-backend = "scikit_build_core.build"
+
 [project]
 name = "lattice"
 version = "0.1.0"
@@ -8,26 +12,39 @@ dependencies = [
     "sympy>=1.14",
     "python-flint>=0.8",
     "hsnf>=0.4",
-    "matplotlib>=3.11",
     "pycddlib>=3.0",
 ]
 
 [dependency-groups]
 dev = [
-    "pybind11>=3.0",
+    "pytest>=8.3",
+    "ruff>=0.12",
     "ipykernel>=7.3",
+    "matplotlib>=3.11",
 ]
 
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+wheel.packages = ["src/lattice"]
+cmake.build-type = "Release"
+
 [tool.uv]
-package = false
+# Rebuild the C++ extensions on `uv sync` whenever their sources change
+cache-keys = [{ file = "pyproject.toml" }, { file = "CMakeLists.txt" }, { file = "src/cpp/*" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]
-# Research/math code: single-letter variable names (A, L, M, U, ...) and
-# `from X import *` star-imports across the flat module layout are
-# intentional, not lint violations.
+# Research/math code: single-letter variable names (A, L, M, U, ...) are intentional.
 select = ["E", "F", "W"]
-ignore = ["E741", "F403", "F405"]
+ignore = ["E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scratchpads import the whole public API
+"experiments/run.py" = ["F403", "F405"]
+"notebooks/*.ipynb" = ["F403", "F405"]

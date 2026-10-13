@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
-
 import math
 import unittest
-from BinLattice import BinBasis, BinLattice, int_seq
+from lattice.binary import BinBasis, BinLattice
+from lattice.enumeration import int_seq
 
 class TestIntSeq(unittest.TestCase):
     def test_int_seq_generation(self):

@@ -3,7 +3,7 @@ import numpy as np
 import random as rnd
 import math
 from collections import deque, defaultdict
-import fp_search_cpp
+from lattice.enumeration import FPSearch
 
 class RootSys:
     """A class for working with Euclidean root systems"""
@@ -163,7 +163,7 @@ class VSearch:
         if self.s <= 0:
             raise ValueError("Error initializing the basis: s is non-positive")
         roots = []
-        FPS = fp_search_cpp.FPSearch(np.array((-self.C).tolist(), dtype=float),
+        FPS = FPSearch(np.array((-self.C).tolist(), dtype=float),
                                     np.zeros(self.rank - 1, dtype=float),
                                     0, 2 * self.exp + 0.5)
         while True:
@@ -206,7 +206,7 @@ class VSearch:
         self.h += 1
         bnum, bden = (self.h * self.b).numer_denom()
         bound = self.s * self.h ** 2
-        return (self.h, fp_search_cpp.FPSearch(np.array((-self.C).tolist(), dtype=float),
+        return (self.h, FPSearch(np.array((-self.C).tolist(), dtype=float),
                                                np.array([float(x) / float(bden) for x in bnum.tolist()[0]], dtype=float),
                                                0.5 + float(bound.p) / float(bound.q),
                                                2 * self.exp + 0.5 + float(bound.p) / float(bound.q)))

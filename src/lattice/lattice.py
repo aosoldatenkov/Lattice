@@ -1,7 +1,11 @@
 from __future__ import annotations
-from Commons import *
+import math
+import numpy as np
+import sympy as sp
+import flint as fl
 from hsnf import smith_normal_form
 from typing import List, Tuple
+from lattice._matrix import IMat, imat, imat_diag, imat2flz, flz2imat, nrows, concat_rows
 
 
 class Lattice:
@@ -164,10 +168,10 @@ class Lattice:
             case (0, self.rank):
                 if transform:
                     M, T = (-self.A_fl).lll(transform=True, rep='gram')
-                    return flz2imat(M), flz2imat(T)
-                return flz2imat((-self.A_fl).lll(rep='gram'))
+                    return flz2imat(-M), flz2imat(T)
+                return flz2imat(-(-self.A_fl).lll(rep='gram'))
             case _:
-                return self._lll_indefinite_np()
+                return self._lll_indefinite_np(transform)
         
     def product(self, u: List[int] | IMat, v: List[int] | IMat) -> int:
         try:

@@ -1,14 +1,13 @@
-from Commons import *
-from BinLattice import *
-from Lattice import *
-from LatticeUtils import *
-from DiscForm import *
-from IntVectors import *
-from Vinberg import *
-from FPSearch import *
-from VSearch import *
-from Allcock import *
-from Circle import *
+import math
+from fractions import Fraction
+from itertools import product
+from typing import List
+import numpy as np
+from lattice._matrix import IMat, imat, imat_diag, nrows, list_rows, flq2imat, inv2x2, euclid
+from lattice.lattice import Lattice
+from lattice.binary import BinLattice
+from lattice.enumeration import FPSearch
+from lattice.vinberg.algorithm import Vinberg
 
 
 def cusp_walls(L: Lattice, v: IMat, base: IMat) -> List[IMat]:
@@ -29,7 +28,7 @@ def cusp_walls(L: Lattice, v: IMat, base: IMat) -> List[IMat]:
     A, T = M.lll(transform=True)
     basis = imat(list_rows(T @ basis))
     M = Lattice(M.rank, A)
-    FPS = fp_search_cpp.FPSearch(np.array(-A, dtype=float), np.zeros(M.rank, dtype=float), 0, 2 * M.exp + 1)
+    FPS = FPSearch(np.array(-A, dtype=float), np.zeros(M.rank, dtype=float), 0, 2 * M.exp + 1)
     vecs = FPS.search_all()
     roots = []
     for u in vecs:
@@ -140,18 +139,3 @@ def RunTest(L: Lattice, base: IMat = None, chamber: IMat = None, h_batch: int = 
     print("Walls:")
     for v in V.active_walls:
         print(v[0], v[1])
-
-def TestDiagLat(rank, d = 1):
-    L = I_lat(1, 0)(d) + I_lat(0, rank - 1)
-    print(L.info())
-    RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
-
-def TestEvenUnimod():
-    L = U_lat() + E_lat(8)(-1) + E_lat(8)(-1)
-    print(L.info())
-    RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=3)
-
-def TestVLat():
-    L = E_lat(8)(-1) + E_lat(8)(-1) + A_lat(2)(-1) + U_lat()
-    print(L.info())
-    RunTest(L, base=[0] * 18 + [1, 1], chamber=[101 - i ** 2 for i in range(20)], h_batch=1, fps_batch=10000, n_iter=3)

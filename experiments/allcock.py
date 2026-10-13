@@ -1,14 +1,11 @@
 import re
 import time
 import datetime
-from Commons import *
-from BinLattice import *
-from Lattice import *
-from LatticeUtils import *
-from IntVectors import *
-from Vinberg import *
-from FPSearch import *
-from VSearch import *
+import math
+from itertools import product
+import numpy as np
+from lattice import imat, BinLattice, Lattice, Coxeter_graph, int_seq, Vinberg
+from lattice._matrix import concat_rows
 
 
 def lorentz_basis_3d(L, bound = 10000):
@@ -118,10 +115,10 @@ def Allcock_group_compare(g1, g2):
         return True
     return False
 
-def CheckAllcock():
+def CheckAllcock(fin="data/out"):
     groups = {}
     start = time.perf_counter()
-    with open('out', "r") as f:
+    with open(fin, "r") as f:
         lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
         for j, l in enumerate(lattices):
             print('#' * 50 + f"{j + 1:^7}" + '#' * 50)

@@ -1,23 +1,11 @@
 #!/usr/bin/env python3
 
-import matplotlib.pyplot as plt
 import random as rnd
 import time
-from Commons import *
-from BinLattice import *
-from Lattice import *
-from LatticeUtils import *
-from DiscForm import *
-from IntVectors import *
-from Vinberg import *
-from FPSearch import *
-from VSearch import *
-from Allcock import *
-from Circle import *
-from ReflectiveTests import *
-from Genus import *
-import fp_search_cpp
-import vsearch_cpp
+from itertools import product
+import numpy as np
+from lattice import *  # scratch script: the whole public API
+from lattice import fp_search_cpp, vsearch_cpp
 
 
 def TestReflections():

@@ -1,17 +1,20 @@
+import math
 from fractions import Fraction
-from Commons import *
-from Lattice import *
-from LatticeUtils import *
-from IntVectors import *
-from FPSearch import *
-from VSearch import *
-import fp_search_cpp
-import vsearch_cpp
+from lattice._matrix import IMat, imat, imat_zero, imat_diag, imat2flz, nrows, concat_rows, list_rows
+from lattice.lattice import Lattice
+from lattice.roots import get_extremal_rays
+from lattice.enumeration import int_seq
+try:
+    from lattice import vsearch_cpp
+except ImportError:  # the C++ extension is not built
+    vsearch_cpp = None
 
 class Vinberg:
 
     def __init__(self, L: Lattice, base: list[int] | IMat = None, chamber: list[int] | IMat = None, h_batch: int = 3, fps_batch: int = 10 ** 3):
         # The lattice L should be of signature (1, n) with n > 0
+        if vsearch_cpp is None:
+            raise ImportError("Vinberg's algorithm requires the vsearch_cpp extension; run `uv sync` to build it")
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L

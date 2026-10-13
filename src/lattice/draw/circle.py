@@ -1,3 +1,4 @@
+import os
 import sys
 import math
 import subprocess
@@ -239,8 +240,10 @@ class PDFPicture:
         lines.append("\\end{document}\n")
         with open(fname, "w", encoding="utf-8") as file_out:
             file_out.writelines(lines)
-        result = subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], 
-                                stdout=subprocess.DEVNULL, 
+        # pdflatex writes its output next to the .tex file
+        result = subprocess.run(["pdflatex", "\\nonstopmode\\input", os.path.basename(fname)],
+                                cwd=os.path.dirname(fname) or None,
+                                stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE)
         if result.returncode != 0:
             raise RuntimeError(f"PDFLaTeX compilation failed: {result.stderr.decode('utf-8')}")

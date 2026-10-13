@@ -1,7 +1,8 @@
-from Commons import *
-from Lattice import *
-from LatticeUtils import *
-from IntVectors import *
+from itertools import product
+import flint as fl
+from hsnf import smith_normal_form
+from lattice._matrix import imat, imat2flz
+from lattice.lattice import Lattice
 
 class DiscForm:
 
