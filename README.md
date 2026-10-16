@@ -55,8 +55,9 @@ falls back to Python).
 ## Setup
 
 Requirements: Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), a C++17 compiler, CMake ≥ 3.18,
-`pkg-config`, GMP with C++ bindings (`libgmp-dev` on Debian/Ubuntu) and, optionally, Eigen ≥ 3.4
-(`libeigen3-dev`; if it is not found, CMake downloads Eigen 3.4.0).
+GMP with C++ bindings (`libgmp-dev` on Debian/Ubuntu) and, optionally, `pkg-config` (used to locate
+GMP if present) and Eigen ≥ 3.4 (`libeigen3-dev`; if it is not found, CMake downloads Eigen 3.4.0).
+On Debian/Ubuntu: `sudo apt install build-essential libgmp-dev` (plus `pkg-config libeigen3-dev` optionally).
 
 ```bash
 uv sync          # installs dependencies and builds/installs the package in editable mode
