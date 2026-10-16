@@ -5,7 +5,7 @@ import sympy as sp
 import flint as fl
 from hsnf import smith_normal_form
 from typing import List, Tuple
-from lattice._matrix import IMat, imat, imat_diag, imat2flz, flz2imat, nrows, concat_rows
+from lattice._matrix import IMat, imat, imat_zero, imat_diag, imat2flz, flz2imat, nrows, concat_rows
 
 
 class Lattice:
@@ -202,31 +202,28 @@ class Lattice:
         M = imat2flz(gens)
         H, T = M.transpose().hnf(transform=True)
         B, _ = T.inv().numer_denom() # T in GL(n, Z), so denom is 1
-        # Finds number of rows in H that are not entirely zero
-        H_len = min(len(gens), M.ncols())
-        num_independent = sum(1 for i in range(H_len) if any(H[i, j] != 0 for j in range(H_len)))
-        B_tr = flz2imat(B.transpose())
-        return B_tr[:num_independent, :]
+        # The nonzero rows of H come first, and there are rank(M) of them
+        return flz2imat(B.transpose())[:M.rank()]
     
     @staticmethod
     def index(gens: List[List[int]] | IMat) -> int:
         """Given a set of generators for a sublattice, returns the index of the sublattice
         spanned by the generators."""
         S = imat2flz(gens).snf()
-        return math.prod([int(S[i, i]) for i in range(len(gens)) if S[i, i] != 0])
+        return math.prod([int(S[i, i]) for i in range(min(S.nrows(), S.ncols())) if S[i, i] != 0])
     
     @staticmethod
     def fibre_product(A1: List[List[int]] | IMat, A2: List[List[int]] | IMat) -> tuple[IMat, IMat]:
         n1 = nrows(A1)
         n2 = nrows(A2)
-        if n1 == 0 or n2 == 0:
-            return []
+        if n1 + n2 == 0:
+            return imat_zero(0, 0), imat_zero(0, 0)
         M = imat2flz(concat_rows(A1, A2)).transpose()
         K, r = M.nullspace()
         _, T = K.hnf(transform=True)
         B, _ = T.inv().numer_denom()
-        C = B.transpose().tolist()[:r]
-        return imat([v[:n1] for v in C]), imat([v[n1 : n1 + n2] for v in C])
+        C = flz2imat(B.transpose())[:r]
+        return C[:, :n1], C[:, n1:]
 
     @staticmethod
     def image(A: List[List[int]] | IMat) -> IMat:
@@ -235,13 +232,13 @@ class Lattice:
         B = L * L.transpose()
         H, T = B.hnf(transform=True)
         rank = sum(1 for i in range(L.nrows()) if any(H[i, j] != 0 for j in range(L.nrows())))
-        return imat((T * L).tolist()[:rank])
+        return flz2imat(T * L)[:rank]
     
     def complement(self, gens: List[List[int]] | IMat) -> IMat:
         """Given a set of generators for a sublattice, returns a basis for its orthogonal complement."""
         G = imat2flz(gens) * self.A_fl
         K, n = G.nullspace()
-        return self.saturate(imat(K.transpose().tolist()[:n]))
+        return self.saturate(flz2imat(K.transpose())[:n])
     
     def subquotient(self, gens: List[List[int]] | IMat) -> IMat:
         """Given a set of generators for a sublattice L, returns a basis for the lattice
@@ -250,7 +247,7 @@ class Lattice:
         B = L * self.A_fl * L.transpose()
         H, T = B.hnf(transform=True)
         rank = sum(1 for i in range(L.nrows()) if any(H[i, j] != 0 for j in range(L.nrows())))
-        return imat((T * L).tolist()[:rank])
+        return flz2imat(T * L)[:rank]
     
     def even_sublattice(self) -> IMat:
         """Returns a basis for the biggest even sublattice of the lattice."""

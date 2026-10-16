@@ -109,7 +109,7 @@ def RunTest(L: Lattice, base: IMat = None, chamber: IMat = None, h_batch: int = 
         for a, (r, s) in enumerate(zip(V.rays, squares)):
             if s >= 0:
                 continue
-            ray, _ = flq2imat(r)
+            ray = flq2imat(r)[0][0]
             new_walls = []
             if L.is_root(ray):
                 new_walls.append(ray if V.L.product(ray, V.base) > 0 else -ray)
