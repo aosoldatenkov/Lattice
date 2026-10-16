@@ -72,10 +72,10 @@ class TestBinLattice(unittest.TestCase):
 
     def test_hyperbolic_plane_U(self):
         """Test the indefinite hyperbolic plane U: 2xy."""
-        # a=0, b=0, h=1 -> disc = -1 < 0
+        # a=0, b=0, h=1 -> det = -1 < 0
         lattice = BinLattice(0, 0, 1)
         self.assertEqual(lattice.signature, (1, 1))
-        self.assertEqual(lattice.disc, -1)
+        self.assertEqual(lattice.disc, 1)
         
         # The river should be empty because the basis vectors are isotropic (a=0, b=0)
         self.assertEqual(len(lattice.river), 0)
@@ -87,10 +87,10 @@ class TestBinLattice(unittest.TestCase):
 
     def test_indefinite_lattice_general(self):
         """Test an indefinite lattice: x^2 + 4xy + y^2."""
-        # a=1, b=1, h=2 -> disc = 1 - 4 = -3 < 0
+        # a=1, b=1, h=2 -> det = 1 - 4 = -3 < 0
         lattice = BinLattice(1, 1, 2)
         self.assertEqual(lattice.signature, (1, 1))
-        self.assertEqual(lattice.disc, -3)
+        self.assertEqual(lattice.disc, 3)
         self.assertIsNotNone(lattice.can)
 
     def test_isomorphic_lattices(self):
