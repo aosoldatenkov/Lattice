@@ -115,7 +115,7 @@ def Allcock_group_compare(g1, g2):
         return True
     return False
 
-def CheckAllcock(fin="data/out"):
+def CheckAllcock(fin="../data/out"):
     groups = {}
     start = time.perf_counter()
     with open(fin, "r") as f:

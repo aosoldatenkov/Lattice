@@ -603,12 +603,12 @@ class BinLattice:
         return dict(vals)
 
     def is_root(self, r: Tuple[Any, Any]) -> bool:
-        """Checks whether r is a root: (r, r) != 0 and the reflection
-        x -> x - 2 (x, r) / (r, r) r preserves the lattice, i.e. (r, r) divides 2 (x, r) for
-        both standard basis vectors x. The vector r need not be primitive. Uses _residue, so
-        that it also works for rational entries."""
+        """Checks whether r is a root: a primitive vector with (r, r) != 0, such that the
+        reflection x -> x - 2 (x, r) / (r, r) r preserves the lattice, i.e. (r, r) divides
+        2 (x, r) for both standard basis vectors x. Non-primitive vectors are never roots.
+        Uses _residue, so that it also works for rational entries of the Gram matrix."""
         norm_sq = self.sqr(r)
-        if norm_sq == 0:
+        if norm_sq == 0 or math.gcd(*r) != 1:
             return False
         # Calculate projection scalars
         val1 = 2 * (self.a * r[0] + self.h * r[1])

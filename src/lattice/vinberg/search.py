@@ -178,6 +178,9 @@ class VSearch:
         self.walls = defaultdict(list)
 
     def _is_root(self, r):
+        """Same as Lattice.is_root: roots are primitive."""
+        if math.gcd(*[int(x) for x in r.entries()]) != 1:
+            return False
         prod = r * self.A
         sq = int((prod * r.transpose())[0, 0])
         if sq == 0:

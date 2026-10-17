@@ -110,6 +110,7 @@ def RunTest(L: Lattice, base: IMat = None, chamber: IMat = None, h_batch: int = 
             if s >= 0:
                 continue
             ray = flq2imat(r)[0][0]
+            ray = ray // math.gcd(*ray.tolist())  # roots are primitive
             new_walls = []
             if L.is_root(ray):
                 new_walls.append(ray if V.L.product(ray, V.base) > 0 else -ray)

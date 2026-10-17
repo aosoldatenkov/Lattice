@@ -35,10 +35,13 @@ class Vinberg:
         self._init_basis()
 
     def _init_basis(self):
+        # The search orients the roots of positive height by (v, base) = h (e_0, base) > 0
+        if self.L.product(self.basis[0], self.base) <= 0:
+            raise ValueError("The first basis vector must have a positive product with the base point")
         B, _ = imat2flz(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
         self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (imat2flz(self.base) * B).tolist()[0], (imat2flz(self.chamber) * B).tolist()[0],
-                                         2.1 * self.M.exp + 0.5, self.h_batch, True, True)
+                                         2 * self.M.exp + 0.5, self.h_batch, True, True)
         self.base_walls = [imat(w) @ self.basis for w in self.VS.get_walls()]
         self.base_walls.sort(key = lambda x: self.L.product(x, self.chamber))
         self.active_walls = [(w, 0) for w in self.base_walls]
@@ -52,6 +55,9 @@ class Vinberg:
         if nrows(base) == 1 and self.L.square(base) > 0:
             base = base.flatten()
             axis = imat([1] + [0] * (self.L.rank - 1))
+            # The sign of the complement is arbitrary; the search needs (e_0, base) > 0
+            if self.L.product(axis, base) < 0:
+                base = -base
             s = float(self.L.square(base)) / float(base[0] ** 2)
             bases.append((s, base, concat_rows(axis, compl)))
         # Attempt to find other bases by searching for positive vectors with small coefficients
@@ -75,7 +81,14 @@ class Vinberg:
         # B = fl.fmpz_mat(self.basis)
         # print(f"{len(self.VS.R.sroots)} walls passing through the base point: {[r * B for r in self.VS.R.sroots]}")
 
-    def run(self, root_batch = 1000, iterations = 1):
+    def run(self, root_batch = 1000, iterations = 1, certify = False):
+        """Runs at most the given number of iterations of the search, and returns the active walls.
+        Stops when the polyhedron bounded by the active walls has finite volume. Rejected roots are
+        never walls of the chamber, but an accepted root is only certain to be a wall once all the
+        roots closer to the base point are known (see docs/Vinberg.md). With certify = True, the run
+        only stops once all the heights up to required_height() have also been searched completely;
+        then the active walls are exactly the walls of the chamber, and self.certified is set."""
+        self.certified = False
         count = 0
         while True:
             count += 1
@@ -88,8 +101,25 @@ class Vinberg:
             self.update_walls(list_rows(walls @ self.basis))
             print(f"Iteration {count}; {len(self.active_walls)} active walls", end='\r')
             if self.update_rays():
-                print("\nThe fundamental domain has finite volume")
-                return [w[0] for w in self.active_walls]
+                if not certify:
+                    print("\nThe fundamental domain has finite volume")
+                    return [w[0] for w in self.active_walls]
+                if self.VS.searched_height() >= self.required_height():
+                    self.certified = True
+                    print("\nThe fundamental domain has finite volume; all the walls are certified")
+                    return [w[0] for w in self.active_walls]
+
+    def required_height(self) -> int:
+        """The height up to which the search must be complete for all the roots at most as far from
+        the base point as the active walls to be known. A root r at height h (the first coordinate
+        in self.basis) has (r, base) = h (e_0, base) and |(r, r)| <= 2 exp, so its key
+        (r, base)^2 / |(r, r)| is at least h^2 (e_0, base)^2 / (2 exp)."""
+        keys = [w[1] for w in self.active_walls if w[1] > 0]
+        if not keys:
+            return 0
+        d0 = self.L.product(self.basis[0], self.base)
+        bound = Fraction(2 * self.L.exp) * max(keys) / (d0 * d0)
+        return math.isqrt(bound.numerator // bound.denominator)
 
     def update_rays(self):
         if len(self.active_walls) == 0:

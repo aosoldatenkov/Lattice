@@ -67,13 +67,14 @@ def int_seq_r(dim: int, max_rr: int = 10 ** 100) -> Iterator[tuple[int]]:
 
 def fincke_pohst_search(A: np.ndarray, b: np.array, lbound: float, ubound: float) -> Iterator[List[int]]:
     """
-    Finds all integer vectors x such that lbound < (x + b)^T A (x + b) <= ubound.
+    Finds all integer vectors x such that lbound < (x + b)^T A (x + b) <= ubound,
+    for a positive definite matrix A. Same algorithm as FPSearch (see fp_search.hpp).
     Uses Cholesky decomposition for O(sqrt(bound)^rank) performance.
     """
     rank = A.shape[0]
-    # Cholesky decomposition: M = R^T R (R is upper triangular)
-    # We add a tiny epsilon to the diagonal for numerical stability on float matrices
-    R = np.linalg.cholesky(A + np.eye(rank) * 1e-10).T 
+    # Cholesky decomposition: M = R^T R (R is upper triangular). No regularization:
+    # it would bias the computed values upwards and lose the vectors close to ubound
+    R = np.linalg.cholesky(A).T
     # State arrays for the DFS
     x = [0] * rank
     dist = np.zeros(rank)
@@ -81,7 +82,7 @@ def fincke_pohst_search(A: np.ndarray, b: np.array, lbound: float, ubound: float
     k = rank - 1
     # Compute the center and bounds for the current coordinate
     z = np.zeros(rank)
-    x[k] = math.floor(math.sqrt(ubound / (R[k, k]**2)) - b[k])
+    x[k] = math.floor(math.sqrt(max(0.0, ubound) / (R[k, k]**2)) - b[k])
     while True:
         # Calculate the partial distance
         d = dist[k] + R[k, k]**2 * (x[k] + b[k] - z[k])**2
@@ -101,7 +102,10 @@ def fincke_pohst_search(A: np.ndarray, b: np.array, lbound: float, ubound: float
                 # Update the center z for the new level
                 z[k] = -sum(R[k, j] * (x[j] + b[j]) for j in range(k + 1, rank)) / R[k, k]
                 # Set the upper bound for this coordinate
-                x[k] = math.floor(math.sqrt((ubound - dist[k]) / (R[k, k]**2)) + z[k] - b[k])
+                x[k] = math.floor(math.sqrt(max(0.0, (ubound - dist[k]) / (R[k, k]**2))) + z[k] - b[k])
+        elif x[k] + b[k] > z[k]:
+            # Outside above the center: the top of the interval was rounded up, continue downwards
+            x[k] -= 1
         else:
             # Prune the branch and step back up
             k += 1
@@ -135,7 +139,8 @@ class BatchGenerator:
 
 class FPSearchPy:
     """
-    Finds all integer vectors x such that lbound < (x + b)^T A (x + b) <= ubound.
+    Finds all integer vectors x such that lbound < (x + b)^T A (x + b) <= ubound,
+    for a positive definite matrix A. Reference implementation of FPSearch (see fp_search.hpp).
     Uses Cholesky decomposition for O(sqrt(bound)^rank) performance.
     """
 
@@ -145,12 +150,12 @@ class FPSearchPy:
         self.b = np.array(b, dtype = float)
         self.lbound = lbound
         self.ubound = ubound
-        self.R = np.linalg.cholesky(self.A + np.eye(self.rank) * 1e-10).T
+        self.R = np.linalg.cholesky(self.A).T  # no regularization, see fincke_pohst_search
         self.x = [0] * self.rank
         self.dist = np.zeros(self.rank)
         self.k = self.rank - 1
         self.z = np.zeros(self.rank)
-        self.x[self.k] = math.floor(math.sqrt(ubound / (self.R[self.k, self.k] ** 2)) - self.b[self.k])
+        self.x[self.k] = math.floor(math.sqrt(max(0.0, ubound) / (self.R[self.k, self.k] ** 2)) - self.b[self.k])
         self._iter = self.iterate()
 
     def iterate(self):
@@ -174,7 +179,10 @@ class FPSearchPy:
                     # Update the center z for the new level
                     self.z[self.k] = -sum(self.R[self.k, j] * (self.x[j] + self.b[j]) for j in range(self.k + 1, self.rank)) / self.R[self.k, self.k]
                     # Set the upper bound for this coordinate
-                    self.x[self.k] = math.floor(math.sqrt((self.ubound - self.dist[self.k]) / (self.R[self.k, self.k]**2)) + self.z[self.k] - self.b[self.k])
+                    self.x[self.k] = math.floor(math.sqrt(max(0.0, (self.ubound - self.dist[self.k]) / (self.R[self.k, self.k]**2))) + self.z[self.k] - self.b[self.k])
+            elif self.x[self.k] + self.b[self.k] > self.z[self.k]:
+                # Outside above the center: the top of the interval was rounded up, continue downwards
+                self.x[self.k] -= 1
             else:
                 # Prune the branch and step back up
                 self.k += 1

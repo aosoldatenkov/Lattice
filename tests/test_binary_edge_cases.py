@@ -128,8 +128,11 @@ class TestBadArguments:
     def test_zero_vector_is_not_a_root(self):
         assert not self.L.is_root((0, 0))
 
-    def test_non_primitive_root(self):
-        assert BinLattice(1, 1, 0).is_root((2, 0))
+    def test_non_primitive_vector_is_not_a_root(self):
+        # The reflection in (2, 0) is integral, but roots are primitive
+        assert BinLattice(1, 1, 0).is_root((1, 0))
+        assert not BinLattice(1, 1, 0).is_root((2, 0))
+        assert not BinLattice(1, 1, 0).is_root((-2, 2))
 
     @pytest.mark.parametrize("other", [(2, 3, 1), None, imat([[2, 1], [1, 3]])], ids=["tuple", "None", "matrix"])
     def test_comparison_with_non_lattice(self, other):
