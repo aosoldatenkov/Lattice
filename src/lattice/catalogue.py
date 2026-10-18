@@ -5,6 +5,8 @@ from lattice.roots import simple_roots, order_vert
 
 
 def A_lat(n):
+    if n < 1:
+        raise ValueError("n must be at least 1")
     I = Lattice(1, [[1]])
     R = I * (n + 1)
     E = imat([[int(i == j) - int(i == j + 1) for i in range(n + 1)] for j in range(n)])
@@ -12,6 +14,8 @@ def A_lat(n):
     return Lattice(n, A)
 
 def B_lat(n):
+    if n < 1:
+        raise ValueError("n must be at least 1")
     I = Lattice(1, [[1]])
     R = I * n
     E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
@@ -20,6 +24,8 @@ def B_lat(n):
     return Lattice(n, A)
 
 def C_lat(n):
+    if n < 1:
+        raise ValueError("n must be at least 1")
     I = Lattice(1, [[1]])
     R = I * n
     E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
@@ -28,6 +34,8 @@ def C_lat(n):
     return Lattice(n, A)
 
 def D_lat(n):
+    if n < 2:
+        raise ValueError("n must be at least 2")
     I = Lattice(1, [[1]])
     R = I * n
     E = imat([[int(i == j) - int(i == j + 1) for i in range(n)] for j in range(n - 1)] +\
@@ -41,7 +49,7 @@ def E_lat(n):
     elif n == 5:
         return D_lat(5)
     elif n not in [6, 7, 8]:
-        raise ValueError("n must be 6, 7, or 8")
+        raise ValueError("n must be 4, 5, 6, 7 or 8")
     A = A_lat(n - 1).A.tolist()
     A = [[2, 0, 0, -1] + [0] * (n - 4)] + [[-int(i == 2)] + A[i] for i in range(n - 1)]
     return Lattice(n, A)
@@ -50,6 +58,8 @@ def U_lat(n = 1):
     return Lattice(2, [[0, n], [n, 0]])
 
 def I_lat(p, q):
+    if p < 0 or q < 0:
+        raise ValueError("p and q must be nonnegative.")
     if p > 0 and q > 0:
         return Lattice(1, [[1]]) * p + Lattice(1, [[-1]]) * q
     elif p > 0 and  q <= 0:
@@ -93,7 +103,7 @@ def E_lat_test(n):
     elif n == 5:
         return D_lat(5)
     elif n not in [6, 7, 8]:
-        raise ValueError("n must be 6, 7, or 8")
+        raise ValueError("n must be 4, 5, 6, 7 or 8")
     n_roots = {6: 72, 7: 126, 8: 240}
     I = Lattice(1, [[1]])
     L = I(-1) + I * n

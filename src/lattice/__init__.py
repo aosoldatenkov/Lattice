@@ -6,7 +6,8 @@ from lattice.binary import BinBasis, BinLattice, list_bin_lattices
 from lattice.genus import Genus
 from lattice.discform import DiscForm
 from lattice.enumeration import int_seq, int_seq_r, fincke_pohst_search, BatchGenerator, FPSearch, FPSearchPy
-from lattice.roots import Coxeter_graph, irred_decomp, get_extremal_rays, order_vert, simple_roots, majorant
+from lattice.roots import Coxeter_graph, get_extremal_rays, order_vert, simple_roots, majorant
+from lattice.decomposition import irred_decomp
 from lattice.catalogue import (A_lat, B_lat, C_lat, D_lat, E_lat, U_lat, I_lat, II_lat_n_1,
                                Leech_lat, Leech_lat_alt, E_lat_test)
 from lattice.vinberg import Vinberg, RootSys, VSearch, cusp_walls, geodesic_walls, RunTest

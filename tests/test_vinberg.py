@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from lattice._matrix import imat, imat_diag, imat2flz
 from lattice.lattice import Lattice
-from lattice.roots import Coxeter_graph, simple_roots, irred_decomp, get_extremal_rays
+from lattice.roots import Coxeter_graph, simple_roots, get_extremal_rays
 from lattice.catalogue import A_lat, D_lat, E_lat, U_lat, I_lat
 from lattice.vinberg import Vinberg
 
@@ -17,11 +17,6 @@ def test_simple_roots_a2():
     simple = simple_roots(L, roots)
     assert len(simple) == 2
     assert Coxeter_graph(L, simple) == {(0, 1): 3}
-
-
-def test_irred_decomp():
-    components = irred_decomp(E_lat(8) + A_lat(2) + D_lat(4))
-    assert sorted(len(b) for b in components) == [2, 4, 8]
 
 
 def test_extremal_rays_triangle():

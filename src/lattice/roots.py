@@ -5,9 +5,8 @@ import numpy as np
 import flint as fl
 import cdd
 import cdd.gmp
-from lattice._matrix import IMat, imat, imat_diag, imat2flz, nrows
+from lattice._matrix import IMat, imat, imat2flz, nrows
 from lattice.lattice import Lattice
-from lattice.enumeration import FPSearch
 
 
 def Coxeter_graph(L, roots):
@@ -35,43 +34,6 @@ def Coxeter_graph(L, roots):
             elif cos == Fraction(3, 4):
                 edges[pair] = 6
     return edges
-
-
-def irred_decomp(L: Lattice):
-    if L.signature not in [(0, L.rank), (L.rank, 0)]:
-        raise ValueError("The lattice must be either positive or negative")
-    if L.signature[0] == 0:
-        L = L(-1)
-    
-    try:
-        B, basis = L.A_fl.lll(rep='gram', transform=True)
-        M = Lattice(L.rank, B.tolist())
-    except:
-        basis = imat2flz(imat_diag([1] * L.rank))
-        M = L
-
-    ubound = float(max(M.A[i, i] for i in range(M.rank)))
-    fps = FPSearch(np.array(M.A, dtype=float), np.zeros(M.rank, dtype=float), 0, ubound + 0.5)
-    vecs = [imat(v) for v in fps.search_all()]
-    vecs.sort(key = lambda x: M.square(x))
-    sublat = []
-    for v in vecs:
-        I = set()
-        b_new = [v]
-        for i, b in enumerate(sublat):
-            if any(M.product(v, x) != 0 for x in b):
-                I.add(i)
-                b_new.extend(sublat[i])
-                break
-        b_reduced = imat2flz(M.image(b_new)).lll().tolist()
-        sublat_new = [b_reduced]
-        if len(I) < len(sublat):
-            sublat_new.extend([sublat[i] for i in range(len(sublat)) if i not in I])
-        sublat = sublat_new
-        span = sum(sublat, start=[])
-        if len(span) == M.rank and M.index(span) == 1:
-            break
-    return([(imat2flz(b) * basis).tolist() for b in sublat])
 
 
 def get_extremal_rays(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> list[fl.fmpq_mat]:
