@@ -108,8 +108,12 @@ $\text{lbound} < (x + b)^T Q (x + b) \leq \text{ubound}$:
 
 `VSearchCpp::init_fps` searches height $h$ with
 $$\text{lbound} = s h^2 + 0.5, \qquad \text{ubound} = s h^2 + \text{bound}, \qquad
-\text{bound} = 2 \exp(L) + 0.5$$
-(`bound` is passed by `Vinberg._init_basis`). The attainable values $s h^2 - (v, v)$ lie in
+\text{bound} = \lfloor c \exp(L) \rfloor + 0.5$$
+(`bound` is passed by `Vinberg._init_basis`). Here $c$ is the internal attribute
+`Vinberg.bound_factor`, set to $c = 2$ in the constructor. It is meant for testing only: to search a
+different window, set `V.bound_factor` and call `V._init_basis()` again, which restarts the search.
+A larger $c$ only adds non-roots, which are rejected; for $c < 2$ some roots may be missed, so
+`run(certify=True)` raises `ValueError`. The attainable values $s h^2 - (v, v)$ lie in
 $s h^2 + \mathbb{Z}$, and the roots have values in $[s h^2 + 1, s h^2 + 2 \exp(L)]$, so both bounds
 keep a margin of $0.5$ from every attainable value: the result does not depend on rounding as
 long as the floating-point errors stay below $0.5$. The center $b$ and $s h^2$ are computed

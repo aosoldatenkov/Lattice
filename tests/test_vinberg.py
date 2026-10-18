@@ -115,6 +115,52 @@ def test_base_point_from_complement_is_oriented():
     assert len(walls) == 3 and V.update_rays()
 
 
+def test_run_with_no_walls_found():
+    """An iteration in which the search returns no walls used to fail, as imat([]) has shape (0,)."""
+    class NoWalls:
+        def __init__(self, VS):
+            self.VS = VS
+
+        def get_walls(self):
+            return []
+
+        def __getattr__(self, name):
+            return getattr(self.VS, name)
+
+    L = I_lat(1, 3)
+    V = Vinberg(L, base=[1, 0, 0, 0])
+    V.VS = NoWalls(V.VS)
+    walls = V.run(iterations=2)
+    assert all(any(np.array_equal(w, b) for b in V.base_walls) for w in walls)
+
+
+@pytest.mark.parametrize("factor", [2, 2.1, 3])
+def test_bound_factor(factor):
+    # A larger search window only adds non-roots, which are rejected; the walls do not change
+    L = I_lat(1, 4)
+    walls = Vinberg(L, base=[1, 0, 0, 0, 0]).run(iterations=10)
+    V = Vinberg(L, base=[1, 0, 0, 0, 0])
+    V.bound_factor = factor
+    V._init_basis()
+    assert {tuple(map(int, w)) for w in V.run(iterations=10, certify=True)} == {tuple(map(int, w)) for w in walls}
+    assert V.certified
+
+
+def test_small_bound_factor_not_certified():
+    V = Vinberg(I_lat(1, 3), base=[1, 0, 0, 0])
+    V.bound_factor = 1.5
+    V._init_basis()
+    with pytest.raises(ValueError):
+        V.run(certify=True)
+
+
+@pytest.mark.parametrize("base", [[0, 1, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]])
+def test_non_positive_base_rejected(base):
+    # Used to be silently replaced by a base point from list_bases
+    with pytest.raises(ValueError):
+        Vinberg(I_lat(1, 3), base=base)
+
+
 def test_cpp_rejects_negative_orientation():
     from lattice import vsearch_cpp
     with pytest.raises(ValueError):

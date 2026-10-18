@@ -18,15 +18,15 @@ def lorentz_basis_3d(L, bound = 10000):
     
     def decompose(L, u):
         compl = L.complement(u)
-        v = L.dual_vec(u)
-        if L.index(compl.tolist() + [v]) != 1:
+        v, _ = L.dual_vec(u)
+        if L.index(concat_rows(compl, v)) != 1:
             raise ValueError("Error constructing decomposition")
         M = compl @ L.A @ compl.transpose()
         B = BinLattice(M[0, 0], M[1, 1], M[0, 1])
         if B.signature != (0, 2):
             raise ValueError("Error: the complement is not sign-definite")
         basis = imat([B.can.e, B.can.f])
-        compl = basis * compl
+        compl = basis @ compl
         M = compl @ L.A @ compl.transpose()
         B = v @ L.A @ compl.transpose()
         M_fl = np.array(M, dtype=np.float64)
@@ -115,13 +115,13 @@ def Allcock_group_compare(g1, g2):
         return True
     return False
 
-def CheckAllcock(fin="../data/out"):
+def CheckAllcock(fin="../data/out", istart=0, iend=-1):
     groups = {}
     start = time.perf_counter()
     with open(fin, "r") as f:
         lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
-        for j, l in enumerate(lattices):
-            print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
+        for j, l in enumerate(lattices[istart:iend]):
+            print('#' * 50 + f"{j + istart + 1:^7}" + '#' * 50)
             lstart = time.perf_counter()
             L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
             nwalls = int(l[-3])

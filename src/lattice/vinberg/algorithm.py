@@ -11,8 +11,18 @@ except ImportError:  # the C++ extension is not built
 
 class Vinberg:
 
-    def __init__(self, L: Lattice, base: list[int] | IMat = None, chamber: list[int] | IMat = None, h_batch: int = 3, fps_batch: int = 10 ** 3):
-        # The lattice L should be of signature (1, n) with n > 0
+    def __init__(self, L: Lattice, base: list[int] | IMat = None, chamber: list[int] | IMat = None, h_batch: int = 3,
+                 fps_batch: int = 10 ** 3):
+        """Prepares Vinberg's algorithm for the lattice L of signature (1, n), n > 0.
+
+        Args:
+            base: the base point, a vector with (base, base) > 0; if None, a base point is chosen
+                by list_bases().
+            chamber: a vector choosing the chamber at the base point (see docs/Vinberg.md).
+            h_batch: the number of heights searched in parallel (the worker threads of the search).
+            fps_batch: the batch size of the Fincke-Pohst search of each worker.
+        """
+
         if vsearch_cpp is None:
             raise ImportError("Vinberg's algorithm requires the vsearch_cpp extension; run `uv sync` to build it")
         if L.signature[0] != 1 or L.signature[1] == 0:
@@ -20,7 +30,16 @@ class Vinberg:
         self.L = L
         self.h_batch = h_batch
         self.fps_batch = fps_batch
-        if base is not None and L.square(base) > 0:
+
+        # The search covers the vectors v with 1 <= -(v, v) <= bound_factor * exp.
+        # All roots satisfy -(v, v) <= 2 exp, so the default 2 finds all of them; a larger
+        # factor only slows the search down, and a smaller one may miss roots (then the
+        # walls cannot be certified).
+        self.bound_factor = 2
+        
+        if base is not None and L.square(base) <= 0:
+            raise ValueError("The base point must have a positive square")
+        if base is not None:
             base = imat(base)
             gcd = math.gcd(*base.tolist())
             self.base = base // gcd
@@ -40,8 +59,10 @@ class Vinberg:
             raise ValueError("The first basis vector must have a positive product with the base point")
         B, _ = imat2flz(self.basis).inv().numer_denom()
         self.M = Lattice(self.L.rank, self.L.batch_prod(self.basis, self.basis))
+        # The values -(v, v) are integers; the bound keeps a margin of 0.5 from them (docs/Vinberg.md, 3.3)
+        bound = math.floor(self.bound_factor * self.M.exp) + 0.5
         self.VS = vsearch_cpp.VSearchCpp(self.M.A.tolist(), (imat2flz(self.base) * B).tolist()[0], (imat2flz(self.chamber) * B).tolist()[0],
-                                         2 * self.M.exp + 0.5, self.h_batch, True, True)
+                                         bound, self.h_batch, True, True)
         self.base_walls = [imat(w) @ self.basis for w in self.VS.get_walls()]
         self.base_walls.sort(key = lambda x: self.L.product(x, self.chamber))
         self.active_walls = [(w, 0) for w in self.base_walls]
@@ -68,7 +89,7 @@ class Vinberg:
                 continue
             if self.L.square(u) > 0:
                 axis, d = self.L.dual_vec(u)
-                compl = self.L.complement(u)
+                compl = self.L.complement([u])
                 bases.append((float(d ** 2) / float(self.L.square(u)), imat(u), concat_rows(axis,compl)))
         return bases
 
@@ -87,7 +108,10 @@ class Vinberg:
         never walls of the chamber, but an accepted root is only certain to be a wall once all the
         roots closer to the base point are known (see docs/Vinberg.md). With certify = True, the run
         only stops once all the heights up to required_height() have also been searched completely;
-        then the active walls are exactly the walls of the chamber, and self.certified is set."""
+        then the active walls are exactly the walls of the chamber, and self.certified is set.
+        Certification requires bound_factor >= 2, so that the search finds all the roots."""
+        if certify and self.bound_factor < 2:
+            raise ValueError("Certification requires bound_factor >= 2")
         self.certified = False
         count = 0
         while True:
@@ -97,7 +121,9 @@ class Vinberg:
                 return [w[0] for w in self.active_walls]
             self.VS.run(root_batch, self.fps_batch)
             self.VS.update_walls()
-            walls = imat(self.VS.get_walls())
+            walls = self.VS.get_walls()
+            # imat([]) has shape (0,), not (0, n); see the shape conventions in _matrix.py
+            walls = imat(walls) if walls else imat_zero(0, self.L.rank)
             self.update_walls(list_rows(walls @ self.basis))
             print(f"Iteration {count}; {len(self.active_walls)} active walls", end='\r')
             if self.update_rays():
@@ -123,7 +149,7 @@ class Vinberg:
 
     def update_rays(self):
         if len(self.active_walls) == 0:
-            return
+            return False
         self.rays, self.lines = get_extremal_rays([w[0] for w in self.active_walls], self.L.A)
         if len(self.lines) == 0:
             squares = [(ray * self.L.A_fl * ray.transpose())[0, 0] for ray in self.rays]
