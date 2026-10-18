@@ -50,15 +50,36 @@ Both the Python and the C++ code order roots by a quantity proportional to this,
 Given a base vector $p$ with $(p, p) > 0$ (made primitive), the driver builds the basis
 $e_0, e_1, \ldots, e_{n-1}$ of $L$ with
 
-- $e_0$ = `axis`, a vector with $(e_0, p) = \operatorname{div}(p)$ (`Lattice.dual_vec`);
-- $e_1, \ldots, e_{n-1}$ a basis of the orthogonal complement $p^\perp \cap L$ (`Lattice.complement`).
+- $e_1, \ldots, e_{n-1}$ an LLL-reduced basis of the orthogonal complement $p^\perp \cap L$, which is
+  negative definite, so that the reduction is exact (`Lattice.complement`, `Lattice.lll`);
+- $e_0$ = `axis`, a vector with $(e_0, p) = \operatorname{div}(p)$ (`Lattice.dual_vec`), shifted by the
+  vector of $p^\perp \cap L$ nearest to its projection to $p^\perp$, so that it is short.
 
-This is a basis of $L$: for $x \in L$, $(x, p) = k \operatorname{div}(p)$ for some $k \in \mathbb{Z}$, and
-$x - k e_0 \in p^\perp$. Without a given base vector, `Vinberg.list_bases` tries candidates with
-small coordinates and picks one. In all cases $(e_0, p) > 0$ is required (and checked, also by
-`VSearchCpp`): the roots of positive height must have positive products with $p$, see §5. When
-`list_bases` takes $p$ from the complement of $e_1, \ldots, e_{n-1}$, whose sign is arbitrary, it
-replaces $p$ by $-p$ if needed.
+This is `Vinberg.reduced_basis`. It is a basis of $L$: for $x \in L$, $(x, p) = k \operatorname{div}(p)$ for
+some $k \in \mathbb{Z}$, and $x - k e_0 \in p^\perp$. The reduction does not change the heights of the
+roots, but it keeps the coordinates (and the bounds of §3.5) small. In all cases $(e_0, p) > 0$ is
+required (and checked, also by `VSearchCpp`): the roots of positive height must have positive
+products with $p$, see §5.
+
+**Choice of the base point** (`Vinberg.list_bases`). Without a given base vector, up to
+`n_candidates` (default 50) candidates are compared: the base point of the given basis, if
+$e_1, \ldots, e_{n-1}$ span the complement of a positive vector (its sign is arbitrary, and $p$ is
+replaced by $-p$ if needed; then the given basis is kept), and the primitive vectors with
+$(p, p) > 0$ and small coordinates in an LLL-reduced basis of $L$. The candidate with the smallest
+$$\frac{(p, p)}{\operatorname{div}(p)^2} = (p^*, p^*), \qquad p^* = p / \operatorname{div}(p) \in L^\vee \text{ primitive},$$
+is chosen (then the smallest $(p, p)$). The reason: a root $r$ at height $h$ has
+$(r, p) = h \operatorname{div}(p)$, and $\sinh d(p, r^\perp) = |(r, p)| / \sqrt{|(r, r)| (p, p)}$, so the walls
+at distance at most $D$ from $p$ have heights
+$$h \leq \sqrt{2 \exp(L)} \, \sinh(D) \, \sqrt{(p^*, p^*)},$$
+and the number of heights to search grows with $(p^*, p^*)$. The distance $D$ to the farthest wall
+is not known in advance. On Allcock's list (rank 3), running the algorithm from each of 10
+candidates on a sample of 522 lattices (in two bases each) showed that this key chooses a base
+point within 6% of the best candidate in total time, while preferring the base points on the most
+mirrors (a vertex of the chamber) and the smallest $(p, p)$ were 1.55 and 1.9 times slower.
+On the whole list with 50 candidates, the total time in the LLL-reduced bases went down from
+1401 s (with 6 overflows) to 302 s, and in the Lorentzian bases built by `experiments/allcock.py`
+it stayed at 384 s (375 s before): the running time no longer depends much on the basis in which
+the lattice is given.
 
 All the search runs in these coordinates. Let $M$ be the Gram matrix in this basis (`self.M`),
 $C = (e_i, e_j)_{i, j \geq 1}$ its lower right block, which is negative definite, and

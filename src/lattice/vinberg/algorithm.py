@@ -1,6 +1,7 @@
 import math
 from fractions import Fraction
-from lattice._matrix import IMat, imat, imat_zero, imat_diag, imat2flz, nrows, concat_rows, list_rows
+import flint as fl
+from lattice._matrix import IMat, imat, imat_zero, imat_diag, imat2flz, flz2imat, nrows, concat_rows, list_rows
 from lattice.lattice import Lattice
 from lattice.roots import get_extremal_rays
 from lattice.enumeration import int_seq
@@ -12,15 +13,16 @@ except ImportError:  # the C++ extension is not built
 class Vinberg:
 
     def __init__(self, L: Lattice, base: list[int] | IMat = None, chamber: list[int] | IMat = None, h_batch: int = 3,
-                 fps_batch: int = 10 ** 3):
+                 fps_batch: int = 10 ** 3, n_candidates: int = 50):
         """Prepares Vinberg's algorithm for the lattice L of signature (1, n), n > 0.
 
         Args:
-            base: the base point, a vector with (base, base) > 0; if None, a base point is chosen
-                by list_bases().
+            base: the base point, a vector with (base, base) > 0; if None, the best of n_candidates
+                short positive vectors is chosen by list_bases().
             chamber: a vector choosing the chamber at the base point (see docs/Vinberg.md).
             h_batch: the number of heights searched in parallel (the worker threads of the search).
             fps_batch: the batch size of the Fincke-Pohst search of each worker.
+            n_candidates: the number of candidate base points compared by list_bases().
         """
 
         if vsearch_cpp is None:
@@ -43,13 +45,11 @@ class Vinberg:
             base = imat(base)
             gcd = math.gcd(*base.tolist())
             self.base = base // gcd
-            axis, _ = self.L.dual_vec(base)
-            compl = self.L.complement([base])
-            self.basis = concat_rows(axis, compl)
+            self.basis = self.reduced_basis(self.base)
         else:
-            b = sorted(self.list_bases(1), key=lambda x: x[0])
-            self.base = b[0][1]
-            self.basis = b[0][2]
+            _, self.base, self.basis = self.list_bases(n_candidates)[0]
+            if self.basis is None:
+                self.basis = self.reduced_basis(self.base)
         self.chamber = imat(chamber) if chamber is not None else imat_zero(1, L.rank)
         self._init_basis()
 
@@ -68,8 +68,48 @@ class Vinberg:
         self.active_walls = [(w, 0) for w in self.base_walls]
         # self.VS = VSearch(self.M.A, self.M.exp, h_batch=self.h_batch, fps_batch=self.fps_batch)
 
-    def list_bases(self, n):
-        bases = []
+    def reduced_basis(self, base: IMat) -> IMat:
+        """A basis (e_0, e_1, ..., e_{n-1}) of L adapted to the primitive vector base with (base, base) > 0:
+        e_1, ..., e_{n-1} is an LLL-reduced basis of the (negative definite) orthogonal complement of base,
+        and e_0 satisfies (e_0, base) = d, the generator of the ideal (base, L), and is shifted by a vector of
+        the complement to be as short as possible (its projection to the complement is reduced)."""
+        axis, _ = self.L.dual_vec(base)
+        compl = self.L.complement([base])
+        G = self.L.batch_prod(compl, compl)
+        _, U = Lattice(nrows(compl), G).lll(transform=True)
+        compl = U @ compl
+        # The projection of axis to the complement has coordinates G^{-1} (compl, axis); subtract its rounding
+        Gq = fl.fmpq_mat(imat2flz(self.L.batch_prod(compl, compl)))
+        x = Gq.solve(fl.fmpq_mat(imat2flz(self.L.batch_prod(compl, imat([axis]))))) if nrows(compl) else None
+        if x is not None:
+            shift = imat([(2 * x[i, 0].p + x[i, 0].q) // (2 * x[i, 0].q) for i in range(x.nrows())])
+            axis = axis - shift @ compl
+        return concat_rows(axis, compl)
+
+    def list_bases(self, n: int) -> list[tuple[tuple, IMat, IMat]]:
+        """Lists up to n candidate base points, best first, as triples (key, base, basis), where basis is
+        the given basis for its base point and None for the others (then reduced_basis(base) is used).
+
+        The candidates are the base point of the given basis, if e_1, ..., e_{n-1} span the complement of a
+        positive vector (then its basis is kept), and the short primitive positive vectors, enumerated by
+        their coordinates in an LLL-reduced basis of L. The key is the square (base, base) / d^2 of the
+        primitive vector base / d of the dual lattice (d generates the ideal (base, L)), then (base, base).
+        A root r at height h has (r, base) = h d, so the walls at distance at most D from the base point
+        have heights h <= sqrt(2 exp (base, base)) sinh(D) / d: the smaller the key, the fewer heights
+        are searched. On Allcock's rank 3 lattices this choice is within 6% of the best of the candidates
+        (see docs/Vinberg.md)."""
+        candidates = []
+        seen = set()
+
+        def add(base, basis):
+            key = tuple(int(x) for x in base)
+            if key in seen or tuple(-x for x in key) in seen:
+                return
+            seen.add(key)
+            _, d = self.L.dual_vec(base)
+            norm = self.L.square(base)
+            candidates.append(((Fraction(norm, d * d), norm), base, basis))
+
         # Check if the given basis is suitable
         compl = imat_diag([1] * self.L.rank)[1:, :]
         base = self.L.complement(compl)
@@ -79,19 +119,22 @@ class Vinberg:
             # The sign of the complement is arbitrary; the search needs (e_0, base) > 0
             if self.L.product(axis, base) < 0:
                 base = -base
-            s = float(self.L.square(base)) / float(base[0] ** 2)
-            bases.append((s, base, concat_rows(axis, compl)))
-        # Attempt to find other bases by searching for positive vectors with small coefficients
+            add(base, concat_rows(axis, compl))
+        # Short positive vectors: small coefficients in an LLL-reduced basis
+        try:
+            _, T = self.L.lll(transform=True)
+        except Exception:  # the floating-point majorant may fail for huge entries
+            T = imat_diag([1] * self.L.rank)
         for u in int_seq(self.L.rank, nonzero=True):
-            if len(bases) >= n:
+            if len(candidates) >= n:
                 break
             if math.gcd(*u) != 1:
                 continue
-            if self.L.square(u) > 0:
-                axis, d = self.L.dual_vec(u)
-                compl = self.L.complement([u])
-                bases.append((float(d ** 2) / float(self.L.square(u)), imat(u), concat_rows(axis,compl)))
-        return bases
+            v = imat(u) @ T
+            if self.L.square(v) > 0:
+                add(v, None)
+        candidates.sort(key=lambda c: c[0])
+        return candidates
 
     def print_info(self):
         print(f"Using {self.base} as the base point")

@@ -162,14 +162,15 @@ class Lattice:
         B = U * self.A_fl * U.transpose()
         return flz2imat(B) if not transform else (flz2imat(B), flz2imat(U))
 
-    def _lll_indefinite_sp(self, precision = 50, rescale = 1e15) -> List[List[int]]:
+    def _lll_indefinite_sp(self, precision = 50, rescale = 1e15, transform: bool = False) -> List[List[int]] | Tuple[IMat, IMat]:
         """
         Applies LLL reduction to an indefinite lattice
         using a positive-definite majorant metric.
         Uses sympy to reduce numerical instability issues with np.linalg.eigh,
         and sympy's cholesky for the majorant basis. Finally, uses sympy's LLL
         to get the transformation matrix. This is much slower than the numpy version,
-        but more stable for large discriminants. Returns the reduced Gram matrix as a list.
+        but more stable for large discriminants. Returns the reduced Gram matrix as a list;
+        with transform=True, returns the pair (M, U) of IMats with M = U A U^T.
         """
         A_sp = sp.Matrix(self.A.tolist())
         P, D = A_sp.diagonalize()
@@ -181,7 +182,10 @@ class Lattice:
         B = (M.cholesky(hermitian=True)).evalf()
         B = B.applyfunc(lambda x: int(x.round()))
         _, U = B.lll_transform()
-        return [[int(x) for x in row] for row in (U * A_sp * U.transpose()).tolist()]
+        M = [[int(x) for x in row] for row in (U * A_sp * U.transpose()).tolist()]
+        if transform:
+            return imat(M), imat([[int(x) for x in row] for row in U.tolist()])
+        return M
 
     def lll(self, transform: bool = False) -> IMat | Tuple[IMat, IMat]:
         """Returns an LLL-reduced Gram matrix M of the lattice; with transform=True,

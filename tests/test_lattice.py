@@ -84,6 +84,14 @@ class TestOperations:
         assert (T @ L.A @ T.T == M).all()
         assert is_unimodular(T)
 
+    def test_lll_indefinite_sp_transform(self):
+        # A rank-3 lattice from Allcock's list (L_{2.1}), negated to signature (1, 2)
+        L = Lattice(3, [[516, -36, -72], [-36, 2, 5], [-72, 5, 10]])
+        M, T = L._lll_indefinite_sp(transform=True)
+        assert (T @ L.A @ T.T == M).all()
+        assert is_unimodular(T)
+        assert M.tolist() == L._lll_indefinite_sp()
+
 
 class TestFinckePohst:
     @pytest.mark.parametrize("L", [E_lat(8), A_lat(3) + D_lat(4)], ids=["E8", "A3+D4"])

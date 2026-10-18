@@ -154,6 +154,38 @@ def test_small_bound_factor_not_certified():
         V.run(certify=True)
 
 
+@pytest.mark.parametrize("gram, base", [([[1, 0, 0], [0, -3, 1], [0, 1, -3]], [3, 1, 1]),
+                                        ([[516, -36, -72], [-36, 2, 5], [-72, 5, 10]], [1, 0, 0]),
+                                        (imat_diag([1, -1, -1, -1, -10]).tolist(), [4, 1, 1, 1, 0])])
+def test_reduced_basis(gram, base):
+    L = Lattice(len(gram), gram)
+    V = Vinberg(L, base=base)
+    B = V.basis
+    _, d = L.dual_vec(V.base)
+    assert abs(int(imat2flz(B).det())) == 1
+    assert L.product(B[0], V.base) == d > 0
+    assert all(L.product(b, V.base) == 0 for b in B[1:])
+    # The complement is LLL-reduced, and the axis has a reduced projection to it
+    C = L.batch_prod(B[1:], B[1:])
+    assert (Lattice(len(C), C).lll() == C).all()
+    proj = np.linalg.solve(np.array(C, dtype=float), np.array(L.batch_prod(B[1:], B[:1]), dtype=float))
+    assert np.all(np.abs(proj) <= 0.5 + 1e-9)
+
+
+def test_base_point_candidates():
+    L = Lattice(3, [[-516, 36, 72], [36, -2, -5], [72, -5, -10]])(-1)
+    V = Vinberg(L, n_candidates=20)
+    candidates = V.list_bases(20)
+    keys = []
+    for key, base, _ in candidates:
+        _, d = L.dual_vec(base)
+        assert L.square(base) > 0 and math.gcd(*[int(x) for x in base]) == 1
+        assert key == (Fraction(L.square(base), d * d), L.square(base))
+        keys.append(key)
+    assert keys == sorted(keys) and len(candidates) == 20
+    assert np.array_equal(V.base, candidates[0][1])
+
+
 @pytest.mark.parametrize("base", [[0, 1, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]])
 def test_non_positive_base_rejected(base):
     # Used to be silently replaced by a base point from list_bases

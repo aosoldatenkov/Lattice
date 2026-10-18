@@ -27,4 +27,5 @@ fp_search__.cpp
 old.py
 data/*
 !data/README.md
+!data/allcock
 CLAUDE.md

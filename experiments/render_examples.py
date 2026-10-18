@@ -1,6 +1,5 @@
 """Rendering experiments: Apollonian packings (PLY) and tilings of Allcock's rank-3 lattices (TikZ/PDF)."""
 import os
-import re
 import time
 import datetime
 import math
@@ -11,7 +10,7 @@ import flint as fl
 from lattice import Lattice, Vinberg, Coxeter_graph, int_seq
 from lattice import vsearch_cpp
 from lattice.draw import Circle, CircleArrangement, Lorentz_ONB, RenderTiling
-from allcock import Allcock_group
+from allcock import Allcock_group, DATASET, load_dataset
 
 
 def Apollonian(outdir="output"):
@@ -118,21 +117,20 @@ def Apollonian3D(outdir="output"):
             print(f"{s[0]:.16f} {s[1]:.16f} {s[2]:.16f} {s[3]:.16f}", file=file_out)
 
 
-def Render_Allcock_chambers(fin="data/out", outdir="output"):
-    with open(fin, "r") as f:
-        lattices = [re.findall(r'-?\d+', line.strip()) for line in f.readlines()]
+def Render_Allcock_chambers(fin=DATASET, outdir="output", form="reduced"):
+    lattices = load_dataset(fin)
 
     lines = []
     lines.append("\\documentclass[tikz]{standalone}\n")
     lines.append("\\begin{document}\n")
     groups = {}
 
-    for j, l in enumerate(lattices):
+    for j, rec in enumerate(lattices):
         print('#' * 50 + f"{j + 1:^7}" + '#' * 50)
         lstart = time.perf_counter()
-        L = Lattice(3, [[int(x) for x in l[i:i+3]] for i in range(0, 9, 3)])
-        nwalls = int(l[-3])
-        Wno = int(l[-2])
+        L = Lattice(3, rec["forms"][form]["gram"])
+        nwalls = rec["nwalls"]
+        Wno = rec["weyl"]
         print(L.info())
         print(L.A)
         V = Vinberg(L, h_batch=100)
