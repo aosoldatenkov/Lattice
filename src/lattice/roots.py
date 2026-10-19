@@ -9,15 +9,26 @@ from lattice._matrix import IMat, imat, imat2flz, nrows
 from lattice.lattice import Lattice
 
 
-def Coxeter_graph(L, roots):
-    """Given a lattice L and a list of roots in L, returns the Coxeter graph of the root system spanned by those roots."""
+def Coxeter_graph(L, roots, reorder: bool = False):
+    """Returns the Coxeter graph of the given roots of L, as a dictionary {(i, j): label} over the pairs
+    i < j, where the label of the pair of roots r, s depends on cos^2 = (r, s)^2 / ((r, r)(s, s)): the
+    mirrors meet at the angle pi / m for cos^2 = 0, 1/4, 1/2, 3/4 (label m = 2, 3, 4, 6), are parallel for
+    cos^2 = 1 (label 'inf'), and are ultraparallel for cos^2 > 1 (label: the Fraction cos^2). For roots of
+    a lattice 4 cos^2 is an integer, so there are no other values.
+
+    By default, i and j are the indices of the roots in the list. With reorder=True, they are instead the
+    positions in the ordering of order_vert() of the graph in which the roots with cos^2 <= 1 are adjacent:
+    for the walls of a polygon (rank 3), this is their cyclic order. This search is exponential in general."""
     rmat = imat(roots)
     nroots = len(roots)
     A = L.batch_prod(rmat, rmat)
     C = [[Fraction(int(A[i, j] ** 2), int(A[i, i] * A[j, j])) for j in range(nroots)] for i in range(nroots)]
-    graph = {i: [j for j in range(nroots) if i != j and C[i][j] <= 1] for i in range(nroots)}
-    path = order_vert(graph, list(range(nroots)))
-    ord = [path.index(i) for i in range(nroots)]
+    if reorder:
+        graph = {i: [j for j in range(nroots) if i != j and C[i][j] <= 1] for i in range(nroots)}
+        path = order_vert(graph, list(range(nroots)))
+        ord = [path.index(i) for i in range(nroots)]
+    else:
+        ord = list(range(nroots))
     edges = {}
     for i in range(nroots):
         for j in range(i + 1, nroots):
@@ -33,13 +44,17 @@ def Coxeter_graph(L, roots):
                 edges[pair] = 4
             elif cos == Fraction(3, 4):
                 edges[pair] = 6
+            elif cos > 1:
+                edges[pair] = cos
     return edges
 
 
-def get_extremal_rays(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> list[fl.fmpq_mat]:
+def get_extremal_rays(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> tuple[list[fl.fmpq_mat], frozenset]:
     """
-    Given a list of roots (normal vectors) and the ambient Gram matrix,
-    returns the exact extremal rays of the resulting polyhedral cone.
+    Given a list of roots (normal vectors) and the ambient Gram matrix, computes exactly (cdd, GMP) the
+    generators of the cone {x : (x, r) >= 0 for all roots r}. Returns the pair (rays, lin_set): the
+    generators as 1 x n fmpq_mats, and the set of the indices of those spanning the lineality space.
+    The cone is pointed iff lin_set is empty; then rays are its extremal rays.
     """
     rank = nrows(gram_matrix)
     # 1. Set up the H-representation for cdd.
@@ -72,7 +87,8 @@ def order_vert(graph, v):
     """Given a graph and a subset of its vertices, extracts the longest possible
     simple path from that set of vertices, removes those vertices, and then
     recursively does the same for the remaining vertices.
-    Returns the concatenation of the paths found at each step."""
+    Returns the concatenation of the paths found at each step.
+    The search for a longest path is exhaustive, hence exponential: use it for small graphs only."""
     if not v:
         return []
     v_set = set(v)  # O(1) lookup for whether a node is in 'v'
@@ -102,7 +118,12 @@ def order_vert(graph, v):
 def simple_roots(L: Lattice, roots: List[IMat] | List[List[int]], dir = None) -> List[IMat] | List[List[int]]:
     """Given a lattice L, a list of roots in L, and an optional direction dir,
     returns a list of simple roots for the root system spanned by the given roots.
-    If dir is not provided, it will be chosen automatically."""
+    If dir is not provided, it will be chosen automatically (reproducibly, without changing the
+    state of the global random generator).
+    The positive roots (those with (dir, r) > 0) are taken by increasing (dir, r), and kept if they are
+    linearly independent of those kept before. This gives the simple roots if the list contains all
+    the roots of the root system and dir is orthogonal to none of them; for a partial list, the
+    result may contain non-simple roots."""
     if len(roots) == 0:
         return []
     if L.signature not in [(L.rank, 0), (0, L.rank)]:
@@ -113,9 +134,9 @@ def simple_roots(L: Lattice, roots: List[IMat] | List[List[int]], dir = None) ->
             raise ValueError("The roots do not span a sign-definite sublattice, so we cannot pick simple roots.")
     if dir is None:
         # Pick a direction that is not orthogonal to any root. This will be used to determine which roots are positive.
-        rnd.seed(roots[0][0])
+        rng = rnd.Random(int(roots[0][0]))
         while True:
-            dir = imat([rnd.randint(1, 10 ** 6) for _ in range(L.rank)])
+            dir = imat([rng.randint(1, 10 ** 6) for _ in range(L.rank)])
             if all(L.product(dir, r) != 0 for r in roots):
                 break
     pos_roots = [r for r in roots if L.product(dir, r) > 0]

@@ -192,6 +192,7 @@ class Vinberg:
 
     def update_rays(self):
         if len(self.active_walls) == 0:
+            self.rays, self.lines = [], []
             return False
         self.rays, self.lines = get_extremal_rays([w[0] for w in self.active_walls], self.L.A)
         if len(self.lines) == 0:

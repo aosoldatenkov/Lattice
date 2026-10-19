@@ -143,7 +143,7 @@ def Render_Allcock_chambers(fin=DATASET, outdir="output", form="reduced"):
         if len(walls) != nwalls:
             print(f"Wrong number of walls, {nwalls} expected")
             break
-        group = Allcock_group(Coxeter_graph(L, walls), len(walls))
+        group = Allcock_group(Coxeter_graph(L, walls, reorder=True), len(walls))
         print(f"The Weyl group: {group}")
         if Wno not in groups:
             groups[Wno] = group
