@@ -33,6 +33,7 @@ only cover height 0.
 """
 from __future__ import annotations
 import math
+import time
 from fractions import Fraction
 from typing import Iterator, List
 import numpy as np
@@ -87,11 +88,14 @@ def roots_by_height(L: Lattice, base: IMat, height: int, threads: int = 1) -> Li
 
 
 def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: int = 1, max_height: int = None,
-                     verbose: bool = False, method: str = "projection") -> dict:
+                     verbose: bool = False, method: str = "projection", progress: bool = False,
+                     progress_interval: float = 10) -> dict:
     """Checks whether the given roots of L (signature (1, n)) bound a fundamental chamber of the reflection
     group of L; see the module docstring for the method. The walls must be oriented so that the
     polyhedron is {x : (x, w) >= 0 for all walls w}. method is "projection" or "height" (the edge check;
     see the module docstring); max_height only applies to the searches of the method "height".
+    With progress=True, prints the numbers of the vertices, cusps and edges of P, and then every
+    progress_interval seconds how many of them have been processed.
 
     Returns a dictionary with:
         certified: True if the walls bound a chamber, False if a violation was found, None if some search
@@ -134,6 +138,21 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
 
     if method not in ("projection", "height"):
         raise ValueError("method must be 'projection' or 'height'")
+    totals = {"vertices": len(finite), "cusps": len(rays) - len(finite), "edges": len(edges)}
+    done = {key: 0 for key in totals}
+    start = last = time.perf_counter()
+    current = ""  # the step in progress, for the reports during long searches
+
+    def report(force=False):
+        nonlocal last
+        now = time.perf_counter()
+        if progress and (force or now - last >= progress_interval):
+            last = now
+            print(f"[{now - start:.0f} s] " + ", ".join(f"{key} {done[key]}/{totals[key]}" for key in totals) +
+                  (f"; {current}" if current and not force else ""), flush=True)
+
+    if progress:
+        print("Polyhedron: " + ", ".join(f"{totals[key]} {key}" for key in totals), flush=True)
     # Assign each edge with a finite endpoint to the endpoint needing the smaller height
     searches = {i: 0 for i in finite}
     assigned = {i: [] for i in finite}
@@ -149,17 +168,17 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
 
     violations, heights, skipped = [], [], []
 
-    def mixed(r, i):
-        signs = {(L.product(r, rays[b]) > 0) - (L.product(r, rays[b]) < 0) for b in adj[i]}
-        return 1 in signs and -1 in signs
-
     A_np = np.array(L.A.tolist(), dtype=object)
     for i in finite:
         a, h = rays[i], searches[i]
         if max_height is not None and h > max_height:
             skipped.append((a.tolist(), h))
+            done["vertices"] += 1
+            done["edges"] += len(assigned[i])
+            report()
             continue
         heights.append((a.tolist(), h))
+        current = f"searching from vertex {done['vertices'] + 1} up to height {h}"
         if verbose:
             print(f"Vertex {a.tolist()}: searching up to height {h}")
         # The products of the roots with a (column 0) and with the adjacent vertices
@@ -175,22 +194,38 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
             for k in np.nonzero((at_a > 0) & neg)[0]:
                 for col in np.nonzero(others[k] < 0)[0]:
                     violations.append(('edge', (a.tolist(), rays[adj[i][col]].tolist()), [int(x) for x in X[k]]))
+            report()
+        done["vertices"] += 1
+        done["edges"] += len(assigned[i])
+        report()
 
     # Ideal vertices: the roots through a, class by class
     for i in range(len(rays)):
         if i in searches:
             continue
         a = rays[i]
-        for w, step, m in cusp_root_classes(L, a):
-            # (r_t, b) = (w, b) + t (step, b); the signs are mixed strictly between the extreme zeros
-            zeros = [Fraction(-L.product(w, rays[b]), L.product(step, rays[b])) for b in adj[i]
-                     if L.product(step, rays[b]) != 0]
-            if len(zeros) < 2:
-                continue
-            for t in range(math.floor(min(zeros)), math.ceil(max(zeros)) + 1):
-                r = w + t * step
-                if L.is_root(r) and mixed(r, i):
-                    violations.append(('cusp', a.tolist(), r.tolist()))
+        current = f"cusp {done['cusps'] + 1}"
+        classes = cusp_root_classes(L, a)
+        if classes and adj[i]:
+            # The products of the representatives w and the steps of all classes with the adjacent vertices
+            G = A_np @ np.array([rays[b].tolist() for b in adj[i]], dtype=object).T
+            PW = _matmul(np.array([w.tolist() for w, _, _ in classes], dtype=object), G)
+            PS = _matmul(np.array([step.tolist() for _, step, _ in classes], dtype=object), G)
+            for k, (w, step, m) in enumerate(classes):
+                # (r_t, b) = (w, b) + t (step, b); the signs are mixed strictly between the extreme zeros
+                pw, ps = PW[k], PS[k]
+                zeros = [Fraction(-int(x), int(y)) for x, y in zip(pw, ps) if y != 0]
+                if len(zeros) < 2:
+                    continue
+                for t in range(math.floor(min(zeros)), math.ceil(max(zeros)) + 1):
+                    values = pw + t * ps
+                    if (values > 0).any() and (values < 0).any():
+                        r = w + t * step
+                        if L.is_root(r):
+                            violations.append(('cusp', a.tolist(), [int(x) for x in r]))
+                report()
+        done["cusps"] += 1
+        report()
 
     # Edges between two ideal vertices: search from a + b
     for i, j in cusp_edges:
@@ -200,17 +235,23 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
         h = (exp * c // min(div[i], div[j])) // L.dual_vec(y)[1]
         if max_height is not None and h > max_height:
             skipped.append((y.tolist(), h))
-            continue
-        heights.append((y.tolist(), h))
-        for r in roots_by_height(L, y, h, threads):
-            if L.product(r, a) * L.product(r, b) < 0:
-                violations.append(('edge', (a.tolist(), b.tolist()), r.tolist()))
+        else:
+            heights.append((y.tolist(), h))
+            current = f"searching from the middle of an edge between cusps up to height {h}"
+            for r in roots_by_height(L, y, h, threads):
+                if L.product(r, a) * L.product(r, b) < 0:
+                    violations.append(('edge', (a.tolist(), b.tolist()), r.tolist()))
+        done["edges"] += 1
+        report()
 
     if method == "projection":
+        current = "edges"
         for i, j in edges:
             for r, _ in edge_crossing_roots(L, rays[i], rays[j]):
                 violations.append(('edge', (rays[i].tolist(), rays[j].tolist()), [int(x) for x in r]))
+            done["edges"] += 1
+            report()
 
+    report(force=True)
     certified = False if violations else (None if skipped else True)
-    return {"certified": certified, "violations": violations, "heights": heights, "skipped": skipped,
-            "vertices": len(finite), "cusps": len(rays) - len(finite), "edges": len(edges)}
+    return {"certified": certified, "violations": violations, "heights": heights, "skipped": skipped, **totals}

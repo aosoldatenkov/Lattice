@@ -7,6 +7,7 @@ from itertools import product
 import numpy as np
 from lattice import *  # scratch script: the whole public API
 from lattice import fp_search_cpp, vsearch_cpp
+from lattice.vinberg import certify_polytope
 
 
 def TestReflections():
@@ -36,19 +37,25 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-          [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-          [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-          [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-          [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
-gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
-for v in product(range(2), repeat=5):
-    gens.append([x % 2 for x in (imat(v) @ G).tolist()])
-basis = Lattice.image(imat(gens))
-K = Lattice(16, basis @ basis.transpose() // 2)
-L = U_lat() + K(-1)
+rank = 19
+L = I_lat(1, 0) + I_lat(0, rank - 1)
 print(L.info())
-print(Genus(L).str())
+walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
+certify_polytope(L, walls, progress=True)
+
+# G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+#           [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+#           [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+#           [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
+# gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
+# for v in product(range(2), repeat=5):
+#     gens.append([x % 2 for x in (imat(v) @ G).tolist()])
+# basis = Lattice.image(imat(gens))
+# K = Lattice(16, basis @ basis.transpose() // 2)
+# L = U_lat() + K(-1)
+# print(L.info())
+# print(Genus(L).str())
 
 # RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=2)
 

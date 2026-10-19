@@ -73,3 +73,11 @@ def test_run_test_walls_certified(n):
 def test_unknown_method():
     with pytest.raises(ValueError):
         certify_polytope(I_lat(1, 2), CHAMBER, method="other")
+
+
+@pytest.mark.parametrize("method", ["projection", "height"])
+def test_progress(method, capsys):
+    certify_polytope(I_lat(1, 2), CHAMBER, method=method, progress=True, progress_interval=0)
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "Polyhedron: 2 vertices, 1 cusps, 3 edges"
+    assert lines[-1].endswith("vertices 2/2, cusps 1/1, edges 3/3")
