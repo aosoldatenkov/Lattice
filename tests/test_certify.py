@@ -79,5 +79,31 @@ def test_unknown_method():
 def test_progress(method, capsys):
     certify_polytope(I_lat(1, 2), CHAMBER, method=method, progress=True, progress_interval=0)
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines[0] == "Polyhedron: 2 vertices, 1 cusps, 3 edges"
+    assert lines[0] == "Computing the polyhedron bounded by 3 walls..."
+    assert lines[1].startswith("Polyhedron: 2 vertices, 1 cusps, 3 edges (computed in ")
     assert lines[-1].endswith("vertices 2/2, cusps 1/1, edges 3/3")
+
+
+def test_cone_structure():
+    """The incidences and adjacencies from cdd agree with the walls through the rays and with the pairs of
+    rays whose common walls have rank n - 2."""
+    from lattice._matrix import imat2flz, flq2imat
+    from lattice.roots import cone_structure
+    n = 7
+    L = I_lat(1, n)
+    walls = [imat([int(x) for x in w]) for w in run_test_walls(n)]
+    cone = cone_structure(walls, L.A)
+    assert not cone["lin_set"]
+    rays = [flq2imat(r)[0][0] for r in cone["rays"]]
+    assert cone["incidence"] == [{j for j, w in enumerate(walls) if L.product(r, w) == 0} for r in rays]
+    for i in range(len(rays)):
+        for j in range(len(rays)):
+            common = [walls[k] for k in cone["incidence"][i] & cone["incidence"][j]]
+            expected = i != j and bool(common) and imat2flz(imat(common)).rank() == L.rank - 2
+            assert (j in cone["adjacency"][i]) == expected
+
+
+def test_cone_structure_not_pointed():
+    from lattice.roots import cone_structure
+    cone = cone_structure([[0, 1, -1]], I_lat(1, 2).A)
+    assert cone["lin_set"]

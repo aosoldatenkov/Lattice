@@ -3,7 +3,7 @@ from fractions import Fraction
 import flint as fl
 from lattice._matrix import IMat, imat, imat_zero, imat_diag, imat2flz, flz2imat, nrows, concat_rows, list_rows
 from lattice.lattice import Lattice
-from lattice.roots import get_extremal_rays
+from lattice.roots import cone_structure
 from lattice.enumeration import int_seq
 try:
     from lattice import vsearch_cpp
@@ -192,9 +192,13 @@ class Vinberg:
 
     def update_rays(self):
         if len(self.active_walls) == 0:
-            self.rays, self.lines = [], []
+            self.rays, self.lines, self.incidence, self.adjacency = [], [], [], []
             return False
-        self.rays, self.lines = get_extremal_rays([w[0] for w in self.active_walls], self.L.A)
+        # The rays of the cone of the active walls, the walls through them (indices in active_walls) and the
+        # adjacent rays (the edges)
+        cone = cone_structure([w[0] for w in self.active_walls], self.L.A)
+        self.rays, self.lines = cone["rays"], cone["lin_set"]
+        self.incidence, self.adjacency = cone["incidence"], cone["adjacency"]
         if len(self.lines) == 0:
             squares = [(ray * self.L.A_fl * ray.transpose())[0, 0] for ray in self.rays]
             if all(x >= 0 for x in squares):

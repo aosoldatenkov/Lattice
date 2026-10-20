@@ -102,10 +102,14 @@ def test_not_positive_definite():
 
 
 def test_coordinates_beyond_int():
+    # The coordinates are 64-bit; they must stay within the exact range 2^52 of double
     with pytest.raises(OverflowError):
-        fp_search_cpp.FPSearch(np.array([[1.0]]), np.zeros(1), 0, 1e20)
+        fp_search_cpp.FPSearch(np.array([[1.0]]), np.zeros(1), 0, 1e40)
     with pytest.raises(OverflowError):
-        fp_search_cpp.FPSearch(np.array([[1.0]]), np.array([3e9]), 0, 1)
+        fp_search_cpp.FPSearch(np.array([[1.0]]), np.array([1e16]), 0, 1)
+    # Beyond 32 bits: the vectors x with 0 < (x + 3 10^9)^2 <= 1
+    found = fp_search_cpp.FPSearch(np.array([[1.0]]), np.array([3e9]), 0, 1).search_all()
+    assert sorted(v[0] for v in found) == [-3000000001, -2999999999]
 
 
 def test_empty_and_negative_bounds():

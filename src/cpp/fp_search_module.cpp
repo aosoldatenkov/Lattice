@@ -16,8 +16,8 @@ PYBIND11_MODULE(fp_search_cpp, m) {
         "attainable values.")
         .def(py::init<Eigen::MatrixXd, Eigen::VectorXd, double, double>(),
              py::arg("A"), py::arg("b"), py::arg("lbound"), py::arg("ubound"),
-             "Raises ValueError if A is not positive definite, OverflowError if the coordinates may not fit "
-             "into a 32-bit int.")
+             "Raises ValueError if A is not positive definite, OverflowError if the coordinates may exceed "
+             "2^52 (the exact range of double).")
         .def("batch_search", &FPSearch::batch_search, py::arg("size"),
              "The next (at most) size vectors; the search resumes from there on the next call.")
         .def("search_all", &FPSearch::search_all, "All the remaining vectors.")

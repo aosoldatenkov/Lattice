@@ -22,7 +22,7 @@ private:
     double lbound;
     double ubound;
     Eigen::MatrixXd R;    // the Cholesky factor: A = R^T R, R upper triangular
-    Eigen::VectorXi x;    // the current vector; x(k), ..., x(rank - 1) are fixed at level k
+    Eigen::Matrix<long, Eigen::Dynamic, 1> x;  // the current vector; x(k), ..., x(rank - 1) are fixed at level k
     Eigen::VectorXd dist; // dist(k): the contribution of the coordinates k + 1, ..., rank - 1 to the value
     Eigen::VectorXd z;    // z(k) - b(k): the center of the admissible interval of x(k) at level k
     int k;                // the current level (rank when the search is exhausted)
@@ -41,7 +41,7 @@ private:
 
 public:
     // Throws std::invalid_argument if A is not positive definite, std::overflow_error if the coordinates
-    // may not fit into int (pybind11: ValueError, OverflowError)
+    // may exceed 2^52, beyond which x + b is not exact in double precision (pybind11: ValueError, OverflowError)
     FPSearch(Eigen::MatrixXd A_in, Eigen::VectorXd b_in, double lbound_in, double ubound_in)
         : rank(A_in.rows()), A(std::move(A_in)), b(std::move(b_in)), lbound(lbound_in), ubound(ubound_in) {
 
@@ -54,22 +54,23 @@ public:
         }
         R = llt.matrixU();
 
-        // The coordinates are stored as int: on the ellipsoid, |x_i + b_i| <= sqrt(ubound (A^-1)_ii)
+        // The coordinates are stored as long, and converted to double: on the ellipsoid,
+        // |x_i + b_i| <= sqrt(ubound (A^-1)_ii), which must stay within the exact range 2^52 of double
         Eigen::MatrixXd A_inv = llt.solve(Eigen::MatrixXd::Identity(rank, rank));
         for (int i = 0; i < rank; ++i) {
             double r = std::abs(b(i)) + std::sqrt(std::max(0.0, ubound) * A_inv(i, i)) + 1;
-            if (!(r < INT_MAX)) throw std::overflow_error("FPSearch: the coordinates do not fit into int");
+            if (!(r < 4503599627370496.0)) throw std::overflow_error("FPSearch: the coordinates may exceed 2^52");
         }
 
         // Initialize state vectors
-        x = Eigen::VectorXi::Zero(rank);
+        x = Eigen::Matrix<long, Eigen::Dynamic, 1>::Zero(rank);
         dist = Eigen::VectorXd::Zero(rank);
         z = Eigen::VectorXd::Zero(rank);
         k = rank - 1;
 
         if (rank > 0) {
             double r_kk = R(k, k);
-            x(k) = static_cast<int>(std::floor(std::sqrt(std::max(0.0, ubound) / (r_kk * r_kk)) - b(k)));
+            x(k) = static_cast<long>(std::floor(std::sqrt(std::max(0.0, ubound) / (r_kk * r_kk)) - b(k)));
         }
     }
 
@@ -79,8 +80,8 @@ public:
     }
 
     // The next (at most) size vectors; the search resumes from there on the next call
-    std::vector<std::vector<int>> batch_search(int size) {
-        std::vector<std::vector<int>> vecs;
+    std::vector<std::vector<long>> batch_search(int size) {
+        std::vector<std::vector<long>> vecs;
 
         // Return early if the search space is exhausted or invalid
         if (exhausted()) {
@@ -97,14 +98,14 @@ public:
                 if (k == 0) {
                     if (d > lbound) {
                         // We reached a valid leaf node, record the vector
-                        std::vector<int> res(rank);
+                        std::vector<long> res(rank);
                         for (int i = 0; i < rank; ++i) {
                             res[i] = x(i);
                         }
                         vecs.push_back(res);
                     } else if (static_cast<double>(x(k)) + b(k) > z(k)) {
                         // Inside the inner ellipsoid above the center: jump to its other side
-                        int candidate = static_cast<int>(std::ceil(2.0 * (z(k) - b(k)) - static_cast<double>(x(k)))) + 1;
+                        long candidate = static_cast<long>(std::ceil(2.0 * (z(k) - b(k)) - static_cast<double>(x(k)))) + 1;
                         x(k) = std::min(x(k), candidate);
                     }
                     x(k) -= 1;
@@ -125,7 +126,7 @@ public:
                     // Set the upper bound for this coordinate.
                     // Note: std::max(0.0, ...) handles floating-point inaccuracies that could push the value slightly < 0
                     double inner_val = std::max(0.0, (ubound - dist(k)) / (R(k, k) * R(k, k)));
-                    x(k) = static_cast<int>(std::floor(std::sqrt(inner_val) + z(k) - b(k)));
+                    x(k) = static_cast<long>(std::floor(std::sqrt(inner_val) + z(k) - b(k)));
                 }
             } else {
                 step_outside();
@@ -138,8 +139,8 @@ public:
     }
 
     // All the remaining vectors
-    std::vector<std::vector<int>> search_all() {
-        std::vector<std::vector<int>> vecs;
+    std::vector<std::vector<long>> search_all() {
+        std::vector<std::vector<long>> vecs;
         while (!exhausted()) {
             auto batch = batch_search(1 << 16);
             vecs.insert(vecs.end(), batch.begin(), batch.end());

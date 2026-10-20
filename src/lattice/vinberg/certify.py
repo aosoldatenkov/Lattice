@@ -39,7 +39,7 @@ from typing import Iterator, List
 import numpy as np
 from lattice._matrix import IMat, imat, imat2flz, flq2imat
 from lattice.lattice import Lattice
-from lattice.roots import get_extremal_rays
+from lattice.roots import cone_structure
 from lattice.vinberg.algorithm import Vinberg, vsearch_cpp
 from lattice.vinberg.walls import cusp_root_classes
 from lattice.vinberg.edges import edge_crossing_roots
@@ -106,25 +106,23 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
         vertices, cusps, edges: the numbers of finite vertices, ideal vertices and edges of P."""
     walls = [imat([int(x) for x in w]) for w in walls]
     n = L.rank
-    rays, lines = get_extremal_rays(walls, L.A)
-    if len(lines) > 0:
+    if progress:
+        print(f"Computing the polyhedron bounded by {len(walls)} walls...", flush=True)
+    t0 = time.perf_counter()
+    # The rays, the walls through them and the edges, in one run of cdd
+    cone = cone_structure(walls, L.A)
+    if len(cone["lin_set"]) > 0:
         raise ValueError("The walls do not bound a pointed cone")
-    rays = [_primitive(flq2imat(r)[0][0]) for r in rays]
+    rays = [_primitive(flq2imat(r)[0][0]) for r in cone["rays"]]
     if any(L.square(r) < 0 for r in rays):
         raise ValueError("The polyhedron has infinite volume")
-    if any(L.product(r, s) < 0 for r in rays for s in rays):
+    # The rays lie in the closed light cone; they lie in one component iff their sum t is timelike and
+    # (r, t) > 0 for all of them
+    t = sum(rays[1:], rays[0])
+    if L.square(t) <= 0 or any(L.product(r, t) <= 0 for r in rays):
         raise ValueError("The extremal rays are not in one component of the light cone")
-    tight = [{j for j, w in enumerate(walls) if L.product(r, w) == 0} for r in rays]
-    # The edges: pairs of rays such that the walls through both have rank n - 2
-    adj = {i: [] for i in range(len(rays))}
-    edges = []
-    for i in range(len(rays)):
-        for j in range(i + 1, len(rays)):
-            common = [walls[k] for k in tight[i] & tight[j]]
-            if common and imat2flz(imat(common)).rank() == n - 2:
-                adj[i].append(j)
-                adj[j].append(i)
-                edges.append((i, j))
+    adj = {i: sorted(cone["adjacency"][i]) for i in range(len(rays))}
+    edges = [(i, j) for i in range(len(rays)) for j in adj[i] if i < j]
     exp = L.exp
     div = [L.dual_vec(r)[1] for r in rays]
     finite = [i for i in range(len(rays)) if L.square(rays[i]) > 0]
@@ -152,7 +150,8 @@ def certify_polytope(L: Lattice, walls: List[IMat] | List[List[int]], threads: i
                   (f"; {current}" if current and not force else ""), flush=True)
 
     if progress:
-        print("Polyhedron: " + ", ".join(f"{totals[key]} {key}" for key in totals), flush=True)
+        print("Polyhedron: " + ", ".join(f"{totals[key]} {key}" for key in totals) +
+              f" (computed in {time.perf_counter() - t0:.1f} s)", flush=True)
     # Assign each edge with a finite endpoint to the endpoint needing the smaller height
     searches = {i: 0 for i in finite}
     assigned = {i: [] for i in finite}

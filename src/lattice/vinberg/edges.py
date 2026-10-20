@@ -62,10 +62,14 @@ def edge_crossing_roots(L: Lattice, a: IMat, b: IMat) -> List[Tuple[IMat, Fracti
         b1, a1, g1 = -b1, -a1, -g1
     if a2 < 0:
         a2, g2 = -a2, -g2
-    # The complement N cap L, its Gram matrix and inverse (for the projections)
+    # The complement N cap L in an LLL-reduced basis (it is negative definite, so the reduction is exact),
+    # its Gram matrix and inverse (for the projections)
     Nb = L.complement([a, b])
     if nrows(Nb) != n - 2:
         raise ValueError("Error constructing the orthogonal complement of the edge")
+    if n > 2:
+        _, U = Lattice(n - 2, L.batch_prod(Nb, Nb)).lll(transform=True)
+        Nb = U @ Nb
     GN = L.batch_prod(Nb, Nb)
     GN_inv = fl.fmpq_mat(imat2flz(GN)).inv() if n > 2 else None
     Q = np.array(-GN, dtype=float) if n > 2 else None
@@ -113,9 +117,15 @@ def _promote(L, y, r_pi2, Nb, GN_inv, Q, exp) -> List[IMat]:
     """The roots y + z, z in L cap N (basis Nb), with (y + z, y + z) >= -2 exp."""
     if GN_inv is None:
         return [y] if L.is_root(y) else []
-    # The coordinates of the projection of y to N in the basis Nb: (y, Nb) GN^{-1}
+    # The coordinates of the projection of y to N in the basis Nb: (y, Nb) GN^{-1}. Subtracting the nearest
+    # vector of L cap N from y does not change the coset y + (L cap N), and brings the center of the
+    # search into [-1/2, 1/2]^(n-2): the lift y itself can be large (it comes from an HNF transformation),
+    # and a large center would overflow the coordinates of FPSearch and lose precision
     yN = fl.fmpq_mat(imat2flz(imat([L.batch_prod(imat([y]), Nb)[0].tolist()]))) * GN_inv
-    center = [float(yN[0, i]) for i in range(yN.ncols())]
+    coords = [Fraction(int(yN[0, i].p), int(yN[0, i].q)) for i in range(yN.ncols())]
+    nearest = [math.floor(x + Fraction(1, 2)) for x in coords]
+    y = y - imat(nearest) @ Nb
+    center = [float(x - k) for x, k in zip(coords, nearest)]
     # -(y_N + z)^2 = (r_Pi, r_Pi) - (r, r) <= 2 exp + (r_Pi, r_Pi); its values lie in (r_Pi, r_Pi) + Z, so the
     # bound keeps a margin of 0.5 from them, and the lower bound -0.5 admits z = -y_N
     ubound = float(2 * exp + r_pi2) + 0.5

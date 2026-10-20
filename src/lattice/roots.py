@@ -49,39 +49,51 @@ def Coxeter_graph(L, roots, reorder: bool = False):
     return edges
 
 
+def cone_structure(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> dict:
+    """
+    Given a list of roots (normal vectors) and the ambient Gram matrix, computes exactly (cdd, GMP) the
+    generators of the cone {x : (x, r) >= 0 for all roots r}, with their incidences and adjacencies, in a
+    single run of the double description method. Returns a dictionary with:
+        rays: the generators, as 1 x n fmpq_mats (the extremal rays if the cone is pointed);
+        lin_set: the set of the indices of the generators spanning the lineality space (empty iff pointed);
+        incidence: for each generator, the set of the indices of the roots orthogonal to it;
+        adjacency: for each generator, the set of the indices of the adjacent generators (for a pointed cone,
+            two extremal rays are adjacent iff they span a 2-face; these are the edges of the polyhedron).
+    """
+    rank = nrows(gram_matrix)
+    # The H-representation: the rows [0, (r, e_1), ..., (r, e_n)] of the inequalities (r, x) >= 0
+    h_rep_data = []
+    for root in roots:
+        functional = imat(root) @ gram_matrix
+        h_rep_data.append([Fraction(0, 1)] + [Fraction(int(val), 1) for val in functional.tolist()])
+    mat = cdd.gmp.matrix_from_array(h_rep_data, rep_type=cdd.RepType.INEQUALITY)
+    poly = cdd.gmp.polyhedron_from_matrix(mat)
+    v_rep = cdd.gmp.copy_generators(poly)
+    incidence = cdd.gmp.copy_incidence(poly)
+    adjacency = cdd.gmp.copy_adjacency(poly)
+    # Keep the rays (type 0); the V-representation of a cone also contains the vertex 0 (type 1)
+    index = {}
+    rays = []
+    for k, row in enumerate(v_rep.array):
+        if row[0] == 0:
+            index[k] = len(rays)
+            rays.append(fl.fmpq_mat(1, rank, [fl.fmpq(row[j].numerator, row[j].denominator) for j in range(1, rank + 1)]))
+    return {"rays": rays,
+            "lin_set": frozenset(index[k] for k in v_rep.lin_set if k in index),
+            "incidence": [set(incidence[k]) for k in index],
+            "adjacency": [{index[j] for j in adjacency[k] if j in index} for k in index]}
+
+
 def get_extremal_rays(roots: list[list[int]] | list[IMat], gram_matrix: IMat) -> tuple[list[fl.fmpq_mat], frozenset]:
     """
     Given a list of roots (normal vectors) and the ambient Gram matrix, computes exactly (cdd, GMP) the
     generators of the cone {x : (x, r) >= 0 for all roots r}. Returns the pair (rays, lin_set): the
     generators as 1 x n fmpq_mats, and the set of the indices of those spanning the lineality space.
-    The cone is pointed iff lin_set is empty; then rays are its extremal rays.
+    The cone is pointed iff lin_set is empty; then rays are its extremal rays. See cone_structure() for
+    the incidences and adjacencies.
     """
-    rank = nrows(gram_matrix)
-    # 1. Set up the H-representation for cdd.
-    # Create the cdd matrix list
-    # The first column is 'b' (which is 0 because we are building a cone starting at the origin)
-    h_rep_data = []
-    for root in roots:
-        # Calculate the linear functional vector for this root: v = root^T * G
-        functional = imat(root) @ gram_matrix
-        # Format for cdd: [0, v_1, v_2, ..., v_n]
-        row = [Fraction(0, 1)] + [Fraction(int(val), 1) for val in functional.tolist()]
-        h_rep_data.append(row)
-    # 2. Initialize the cdd Matrix in exact rational mode
-    mat = cdd.gmp.matrix_from_array(h_rep_data, rep_type=cdd.RepType.INEQUALITY)
-    # 3. Use the polyhedron factory function
-    poly = cdd.gmp.polyhedron_from_matrix(mat)
-    # 4. Extract the V-representation
-    v_rep = cdd.gmp.copy_generators(poly)
-    extreme_rays = []
-    for row in v_rep.array:
-        ray_type = row[0]
-        if ray_type == 0:
-            # Extract just the vector components
-            ray = fl.fmpq_mat(1, rank, [fl.fmpq(row[j].numerator, row[j].denominator) for j in range(1, rank + 1)])
-            extreme_rays.append(ray)
-    return extreme_rays, v_rep.lin_set
-
+    cone = cone_structure(roots, gram_matrix)
+    return cone["rays"], cone["lin_set"]
 
 def order_vert(graph, v):
     """Given a graph and a subset of its vertices, extracts the longest possible

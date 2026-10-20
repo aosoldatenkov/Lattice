@@ -188,7 +188,7 @@ def RunTest(L: Lattice, base: IMat = None, chamber: IMat = None, h_batch: int = 
         for r in V.rays:
             ray = flq2imat(r)[0][0]
             rays.append(ray // math.gcd(*[int(x) for x in ray]))
-        tight = [[L.product(ray, w) == 0 for w in walls] for ray in rays]
+        incidence, adjacency = V.incidence, V.adjacency
         for a, ray in enumerate(rays):
             s = L.square(ray)
             if s > 0:
@@ -202,14 +202,9 @@ def RunTest(L: Lattice, base: IMat = None, chamber: IMat = None, h_batch: int = 
             else:
                 if L.is_root(ray):
                     new_walls.append(ray)
-                # The edges through the ray: the 2-faces spanned with the adjacent rays, i.e. the rays b such
-                # that the walls through both rays have rank n - 2
-                for b in range(len(rays)):
-                    if b == a:
-                        continue
-                    common = [walls[j] for j in range(len(walls)) if tight[a][j] and tight[b][j]]
-                    if not common or imat2flz(imat(common)).rank() != L.rank - 2:
-                        continue
+                # The edges through the ray: the 2-faces spanned with the adjacent rays (from cdd)
+                for b in adjacency[a]:
+                    common = [walls[j] for j in incidence[a] & incidence[b]]
                     compl = L.complement(common)
                     if nrows(compl) != 2:
                         continue
