@@ -7,7 +7,7 @@ from itertools import product
 import numpy as np
 from lattice import *  # scratch script: the whole public API
 from lattice import fp_search_cpp, vsearch_cpp
-from lattice.vinberg import certify_polytope
+from lattice.vinberg import certify_polytope, trace_chamber
 
 
 def TestReflections():
@@ -40,10 +40,13 @@ def TestReflections():
 rank = 20
 L = I_lat(1, 0) + I_lat(0, rank - 1)
 print(L.info())
-walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
-cert = certify_polytope(L, walls, progress=True)
-print("Certified:", cert["certified"])
-print("Violations:", cert["violations"])
+print(trace_chamber(L, base=[1] + [0] * (rank - 1),
+                    chamber=[rank ** 2 - i ** 2 for i in range(rank)],
+                    progress=True))
+# walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
+# cert = certify_polytope(L, walls, progress=True)
+# print("Certified:", cert["certified"])
+# print("Violations:", cert["violations"])
 
 # G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 #           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
