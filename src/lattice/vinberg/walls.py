@@ -37,20 +37,27 @@ def cusp_root_classes(L: Lattice, v: IMat) -> List[tuple]:
     M = Lattice(M.rank, A)
     # The bounds keep a margin of 0.5 from the integer values of -(u, u)
     FPS = FPSearch(np.array(-A, dtype=float), np.zeros(M.rank, dtype=float), 0.5, 2 * L.exp + 0.5)
+    vecs = FPS.search_all()
+    if not vecs:
+        return []
+    # All the products at once: the norms b = -(u, u), the contents of the rows (u, M), the lifts w and 2 (w, dual)
+    U = np.array(vecs, dtype=object)
+    UA = U @ np.array(M.A.tolist(), dtype=object)
+    norms = -(UA * U).sum(axis=1)
+    W = U @ np.array(basis.tolist(), dtype=object)
+    Y = 2 * (W @ (np.array(L.A.tolist(), dtype=object) @ np.array([int(x) for x in dual], dtype=object)))
     classes = []
-    for u in FPS.search_all():
-        u = imat([int(x) for x in u])
-        b = -M.square(u)
-        if (2 * math.gcd(*[int(x) for x in u @ M.A])) % b != 0:
+    for k in range(len(vecs)):
+        b = int(norms[k])
+        if (2 * math.gcd(*[int(x) for x in UA[k]])) % b != 0:
             continue
-        w = u @ basis
         # Solve 2 div(v) k = -2 (w, dual) mod b
         c, x, _, _, _ = euclid(2 * a, b)
-        y = 2 * L.product(dual, w)
+        y = int(Y[k])
         if y % c != 0:
             continue
-        w = w - (y // c) * x * v
-        classes.append((w, (b // c) * v, math.gcd(*[int(z) for z in u])))
+        w = imat([int(z) for z in W[k]]) - (y // c) * x * v
+        classes.append((w, (b // c) * v, math.gcd(*[int(z) for z in U[k]])))
     return classes
 
 
@@ -66,11 +73,26 @@ def cusp_walls(L: Lattice, v: IMat, base: IMat) -> List[IMat]:
     if L.product(v, base) < 0:
         v = -v
     roots = []
-    for w, step, m in cusp_root_classes(L, v):
-        if L.product(step, base) < 0:
-            step = -step
+    classes = cusp_root_classes(L, v)
+    if not classes:
+        return roots
+    base_A = np.array(L.A.tolist(), dtype=object) @ np.array([int(x) for x in base], dtype=object)
+    pw = np.array([[int(x) for x in w] for w, _, _ in classes], dtype=object) @ base_A
+    ps = np.array([[int(x) for x in st] for _, st, _ in classes], dtype=object) @ base_A
+    for k, (w, step, m) in enumerate(classes):
+        wb, sb = int(pw[k]), int(ps[k])
+        if sb < 0:
+            step, sb = -step, -sb
         # r_t = w + t step has (r_t, base) = (w, base) + t (step, base); t0 is the smallest t with a nonnegative value
-        t0 = -(L.product(w, base) // L.product(step, base))
+        t0 = -(wb // sb)
+        if m == 1:
+            # u is primitive in v^perp / v, so all the r_t are primitive, hence roots (the divisibility
+            # conditions hold by the construction of the class)
+            roots.append(w + t0 * step)
+            if wb + t0 * sb == 0:
+                roots.append(w + (t0 + 1) * step)
+            roots.append(w + (t0 - 1) * step)
+            continue
         for direction in (1, -1):
             t = t0 if direction == 1 else t0 - 1
             for _ in range(m + 1):

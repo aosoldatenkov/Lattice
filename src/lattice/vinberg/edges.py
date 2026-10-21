@@ -29,9 +29,21 @@ from fractions import Fraction
 from typing import List, Tuple
 import numpy as np
 import flint as fl
-from lattice._matrix import IMat, imat, imat2flz, flz2imat, nrows
+from lattice._matrix import IMat, imat, imat_zero, imat2flz, flz2imat, nrows
 from lattice.lattice import Lattice
 from lattice.enumeration import FPSearch
+
+
+def lll_negative_definite(L: Lattice, B: IMat) -> IMat:
+    """An LLL-reduced basis of the negative definite sublattice of L spanned by the rows of the basis B
+    (exact: FLINT's LLL on the Gram matrix, without constructing a Lattice)."""
+    if nrows(B) == 0:
+        return B
+    G = imat2flz(L.batch_prod(B, B))
+    _, T = (-G).lll(rep='gram', transform=True)
+    # Python ints: numpy products of fmpz entries are much slower
+    R = imat([[int(x) for x in row] for row in T.tolist()]) @ imat([[int(x) for x in row] for row in B])
+    return imat([[int(x) for x in row] for row in R])
 
 
 def _ceil_div(x: Fraction | int, y: Fraction | int) -> int:
@@ -39,10 +51,16 @@ def _ceil_div(x: Fraction | int, y: Fraction | int) -> int:
     return -((-q.numerator) // q.denominator)
 
 
-def edge_crossing_roots(L: Lattice, a: IMat, b: IMat) -> List[Tuple[IMat, Fraction]]:
+def edge_crossing_roots(L: Lattice, a: IMat, b: IMat, include_end: bool = False,
+                        complement: IMat = None) -> List[Tuple[IMat, Fraction | None]]:
     """All the roots of L whose mirrors cross the open segment between a and b (see the module docstring),
     oriented so that (r, a) > 0 > (r, b), as pairs (root, t) sorted by t = (r, a) / |(r, b)|: the crossing
-    point is proportional to a + t b, so t increases from a to b."""
+    point is proportional to a + t b, so t increases from a to b.
+
+    With include_end=True (b finite), if no root crosses the open segment, the roots through b with the smallest
+    (r, a) > 0 are returned instead, as pairs (root, None): they have B = 0, and (x, x) = A^2 q <= 2 exp D
+    bounds A, which is scanned upwards until roots are found. complement is an optional LLL-reduced basis of
+    L cap N (N the orthogonal complement of a and b), to avoid recomputing it."""
     a, b = imat([int(x) for x in a]), imat([int(x) for x in b])
     p, q, c = L.square(a), L.square(b), L.product(a, b)
     if p < 0 or q < 0 or c <= 0:
@@ -62,14 +80,17 @@ def edge_crossing_roots(L: Lattice, a: IMat, b: IMat) -> List[Tuple[IMat, Fracti
         b1, a1, g1 = -b1, -a1, -g1
     if a2 < 0:
         a2, g2 = -a2, -g2
+    if include_end and q <= 0:
+        raise ValueError("include_end requires a finite end b")
     # The complement N cap L in an LLL-reduced basis (it is negative definite, so the reduction is exact),
     # its Gram matrix and inverse (for the projections)
-    Nb = L.complement([a, b])
-    if nrows(Nb) != n - 2:
-        raise ValueError("Error constructing the orthogonal complement of the edge")
-    if n > 2:
-        _, U = Lattice(n - 2, L.batch_prod(Nb, Nb)).lll(transform=True)
-        Nb = U @ Nb
+    if complement is not None:
+        Nb = imat(complement).reshape(-1, n) if n > 2 else imat_zero(0, n)
+    else:
+        Nb = L.complement([a, b])
+        if nrows(Nb) != n - 2:
+            raise ValueError("Error constructing the orthogonal complement of the edge")
+        Nb = lll_negative_definite(L, Nb)
     GN = L.batch_prod(Nb, Nb)
     GN_inv = fl.fmpq_mat(imat2flz(GN)).inv() if n > 2 else None
     Q = np.array(-GN, dtype=float) if n > 2 else None
@@ -96,20 +117,20 @@ def edge_crossing_roots(L: Lattice, a: IMat, b: IMat) -> List[Tuple[IMat, Fracti
                 A = s * a1 + t * a2
                 y = s * g1 + t * g2
                 r_pi2 = Fraction(-(A * A * q + 2 * A * absB * c + absB * absB * p), D)
-                result.extend(_promote(L, y, r_pi2, Nb, GN_inv, Q, exp))
+                result.extend((r, A, B) for r in _promote(L, y, r_pi2, Nb, GN_inv, Q, exp))
         s -= 1
-    # Orient, check and sort
-    roots = []
-    seen = set()
-    for r in result:
-        key = tuple(int(x) for x in r)
-        if key in seen:
-            continue
-        seen.add(key)
-        A, B = L.product(r, a), L.product(r, b)
-        if A > 0 > B:
-            roots.append((r, Fraction(A, -B)))
-    roots.sort(key=lambda x: x[1])
+    # The roots found have (r, a) = A > 0 > (r, b) = B by construction (the lifts y + z with z in N keep the
+    # products), and distinct (A, B) or z give distinct roots
+    roots = sorted(((r, Fraction(A, -B)) for r, A, B in result), key=lambda x: x[1])
+    if include_end and not roots:
+        # No crossing: the roots through b (B = 0, A in a2 Z, A^2 q <= bound) with the smallest A
+        A_max = math.isqrt(bound // q)
+        for t in range(1, A_max // a2 + 1):
+            A = t * a2
+            found = _promote(L, t * g2, Fraction(-A * A * q, D), Nb, GN_inv, Q, exp)
+            if found:
+                roots.extend((r, None) for r in found)
+                break
     return roots
 
 
@@ -131,9 +152,21 @@ def _promote(L, y, r_pi2, Nb, GN_inv, Q, exp) -> List[IMat]:
     ubound = float(2 * exp + r_pi2) + 0.5
     if ubound < 0:
         return []
-    roots = []
-    for k in FPSearch(Q, np.array(center), -0.5, ubound).search_all():
-        r = y + imat([int(x) for x in k]) @ Nb
-        if L.is_root(r):
-            roots.append(r)
-    return roots
+    ks = FPSearch(Q, np.array(center), -0.5, ubound).search_all()
+    if not ks:
+        return []
+    R = np.array([int(x) for x in y], dtype=object) + np.array(ks, dtype=object) @ np.array(Nb.tolist(), dtype=object)
+    return [imat([int(x) for x in R[i]]) for i in np.nonzero(_root_mask(L, R))[0]]
+
+
+def _root_mask(L: Lattice, R: np.ndarray) -> np.ndarray:
+    """Lattice.is_root for the rows of R at once: r is primitive, (r, r) != 0, and (r, r) divides 2 (r, e_i)."""
+    RA = R @ np.array(L.A.tolist(), dtype=object)
+    norms = (RA * R).sum(axis=1)
+    mask = np.zeros(len(R), dtype=bool)
+    for i in range(len(R)):
+        nr = int(norms[i])
+        if nr == 0 or math.gcd(*[int(x) for x in R[i]]) != 1:
+            continue
+        mask[i] = all((2 * int(x)) % nr == 0 for x in RA[i])
+    return mask

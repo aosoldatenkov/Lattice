@@ -42,7 +42,8 @@ L = I_lat(1, 0) + I_lat(0, rank - 1)
 print(L.info())
 print(trace_chamber(L, base=[1] + [0] * (rank - 1),
                     chamber=[rank ** 2 - i ** 2 for i in range(rank)],
-                    progress=True))
+                    progress=True,
+                    threads=16))
 # walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
 # cert = certify_polytope(L, walls, progress=True)
 # print("Certified:", cert["certified"])

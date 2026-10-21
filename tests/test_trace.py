@@ -92,3 +92,20 @@ def test_max_vertices():
 def test_progress(capsys):
     trace_chamber(I_lat(1, 4), base=[1, 0, 0, 0, 0], progress=True)
     assert "done: 5 walls, 4 vertices, 1 cusps, 10 edges" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("L, base, chamber", [
+    (I_lat(1, 10), [1] + [0] * 10, [121 - i ** 2 for i in range(11)]),
+    (I_lat(1, 7), [9, 1, 2, 3, 0, 1, 4, 2], None),
+    (Lattice(3, [[2, 1, 60], [1, -2, 0], [60, 0, -120]]), None, None),
+])
+def test_parallel(L, base, chamber):
+    """Worker processes give the same chamber, vertices and edges as the main process alone."""
+    serial = trace_chamber(L, base=base, chamber=chamber)
+    parallel = trace_chamber(L, base=base, chamber=chamber, threads=3)
+    assert keys(parallel["walls"]) == keys(serial["walls"])
+    for key in ("vertices", "cusps", "edges"):
+        assert parallel[key] == serial[key]
+    s, p = serial["tracer"], parallel["tracer"]
+    assert set(s.vertices) == set(p.vertices)
+    assert {frozenset(e) for e in s.edges.values()} == {frozenset(e) for e in p.edges.values()}
