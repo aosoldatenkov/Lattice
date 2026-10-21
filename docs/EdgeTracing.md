@@ -13,6 +13,7 @@ Code references:
 |---|---|
 | Traversal, local walls, start vertex, parallel scheduler | `src/lattice/vinberg/trace.py` (`trace_chamber`, `ChamberTracer`, `trace_ray`) |
 | Roots crossing a segment | `src/lattice/vinberg/edges.py` (`edge_crossing_roots`) |
+| The per-edge core in C++ (§7) | `src/cpp/edge_module.cpp` (module `edge_cpp`: `crossing_roots`, `trace_edge`, `vertex_directions`) |
 | Roots through a cusp | `src/lattice/vinberg/walls.py` (`cusp_root_classes`, `cusp_walls`) |
 | Conway's river of a binary lattice | `src/lattice/binary.py` (`BinLattice`) |
 | Root system at a point (height 0 of a search), used for the start vertex | `src/lattice/vinberg/certify.py` (`roots_by_height`) |
@@ -177,30 +178,58 @@ and every edge has two distinct ends whose walls contain the walls of the edge; 
 and the walls at a new vertex contain those of the incoming edge. `max_vertices` stops the traversal of a
 lattice which is not reflective (or whose chamber is too large).
 
-## 7. Validation and performance
+## 7. The C++ core (`edge_cpp`)
+
+The work on an edge is done in C++ when possible; the Python implementation remains the reference
+(`ChamberTracer(cpp=False)`, `edge_crossing_roots(use_cpp=False)`) and the fallback.
+
+- `crossing_roots(A, exp, a, b, include_end)`: the search of §4. The complement of the plane is the kernel of
+  $(\cdot, a)$ on $\mathbb{Z}^{n+1}$, then of $(\cdot, b)$ (unimodular transformations from extended gcds), reduced
+  by LLL; $\Lambda$ and the lifts come from a 2-dimensional HNF; the promotion searches use `FPSearch`
+  (`fp_search.hpp`) with the center computed from the Cholesky factor of the complement; the root test is exact.
+- `trace_edge(A, exp, a, u, walls, edge_walls)`: cases 1 and 2 of §3 and the new wall of §5. It returns
+  `(0, end, wall)` for a finite end, `(1, cusp, None)` for a rational ideal end, and `(2, None, None)` for an
+  irrational one, for which Python walks along the river (its segments are searched by `crossing_roots`). The new
+  wall is chosen exactly: $y$ is replaced by $\det(G) \, G^{-1} \mathbf{1}$, $G$ the Gram matrix of the walls of
+  the edge, by fraction-free elimination.
+- `vertex_directions(A, v, S)`: the directions of the edges at a finite vertex, each the generator of the kernel
+  of $(\cdot, v)$ and $(\cdot, s_i)$, $i \neq j$.
+
+Integers are 64-bit, with 128-bit intermediate values; every operation that might overflow is checked
+(`__builtin_*_overflow`) and raises `OverflowError`, and then the Python implementation, with arbitrary precision,
+is used. The only floating-point steps are the LLL reduction of the complement (the row operations are exact and
+unimodular, so only the quality of the reduction depends on the rounding; the integer Gram matrix is updated
+exactly, and the Gram-Schmidt data are recomputed after each swap) and the Fincke-Pohst searches (bounds with a
+margin of 0.5, and the candidates checked exactly). The cusps (§5) are still handled in Python.
+
+## 8. Validation and performance
 
 - $I_{1,n}$, $n \leq 14$: the same walls as `RunTest`, and the same numbers of vertices, cusps and edges as cdd
   (`tests/test_trace.py`).
 - All 8595 lattices of Allcock's list (`experiments/allcock.py`): the same numbers of walls and the same
-  cyclic sequences of norms and angles as Allcock's simple roots; 780 s in total, at most 2.7 s per lattice.
+  cyclic sequences of norms and angles as Allcock's simple roots; 155 s in total with the C++ core (780 s in
+  Python), at most 1.8 s per lattice.
 - $I_{1,19}$: 50 walls, 27260 finite vertices, 581 cusps, 292340 edges, the same as `RunTest` + cdd +
   `certify_polytope`; about 20 minutes in one process before the optimizations below, 95 s with 16 worker
   processes after them.
-- $I_{1,14}$ (89 vertices, 5 cusps, 704 edges): about 1 s in one process, 0.2 s with 8 workers.
+- $I_{1,14}$ (89 vertices, 5 cusps, 704 edges): 1.1 s in one process in Python, 0.2 s with the C++ core.
+- `tests/test_edge_cpp.py` compares the C++ core with the Python implementation on random segments, on the edges
+  of chambers (with and without known walls), and on complete traversals; it also checks the fallback to Python
+  beyond 64 bits.
 
 The optimizations that matter: the new wall at a finite vertex from the roots found by the edge search
 (instead of the root system of the vertex); the reduced complements of the vertices, from which the edge
 directions and complements follow; vectorized products and root tests in the edge search and at the cusps;
 Python integers rather than FLINT `fmpz` in numpy arrays (several times faster); and the walk along the river
-for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after).
+for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after); and the C++ core (§7), a factor of about 5.
 
-## 8. Open points
+## 9. Open points
 
 - **Symmetry.** Large symmetric chambers (the 210 walls of $U \oplus D_{20}$, Borcherds' 17-dimensional example
   with 960 walls) may have too many edges for a full traversal. A group of isometries of $L$ preserving $C$,
   known in advance or computed from the final walls, would allow tracing one vertex and edge per orbit.
-- **C++.** On $I_{1,14}$ the time is now mostly in the products, the Fincke–Pohst promotion searches and the
-  per-edge LLL reductions, i.e. the per-edge core of `edge_crossing_roots`, the natural part for a C++ port.
+- **Cusps in C++.** With the C++ core, the walls at the cusps (`cusp_root_classes`, the acceptance, the edges at
+  a cusp) are the largest remaining part in Python.
 - **Coxeter diagrams.** Vertices and edges could be identified by their sets of walls alone (elliptic and
   parabolic subdiagrams), and the diagram gives free consistency checks (each edge has two ends, the f-vector,
   the Euler characteristic).

@@ -48,8 +48,11 @@ target_link_libraries(fp_search_cpp PRIVATE Eigen3::Eigen)
 pybind11_add_module(vsearch_cpp src/cpp/vsearch_module.cpp)
 target_link_libraries(vsearch_cpp PRIVATE Eigen3::Eigen GMP::GMPXX Threads::Threads)
 
-foreach(target fp_search_cpp vsearch_cpp)
+pybind11_add_module(edge_cpp src/cpp/edge_module.cpp)
+target_link_libraries(edge_cpp PRIVATE Eigen3::Eigen)
+
+foreach(target fp_search_cpp vsearch_cpp edge_cpp)
     target_compile_options(${target} PRIVATE -Wall)
 endforeach()
 
-install(TARGETS fp_search_cpp vsearch_cpp LIBRARY DESTINATION lattice)
+install(TARGETS fp_search_cpp vsearch_cpp edge_cpp LIBRARY DESTINATION lattice)

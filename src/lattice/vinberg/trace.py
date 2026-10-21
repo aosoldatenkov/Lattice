@@ -55,7 +55,7 @@ from lattice.lattice import Lattice
 from lattice.vinberg.walls import cusp_walls
 from lattice.binary import BinLattice
 from lattice._matrix import inv2x2
-from lattice.vinberg.edges import edge_crossing_roots, lll_negative_definite
+from lattice.vinberg.edges import edge_crossing_roots, lll_negative_definite, edge_cpp
 from lattice.vinberg.certify import roots_by_height
 
 
@@ -160,13 +160,16 @@ def _cusp_local_walls(L: Lattice, z: IMat, F: List[IMat], m: IMat) -> List[IMat]
         keep.sort(key=lambda k: Fraction(int(pm[k]) ** 2, -int(norms[k])))
     else:
         keep = []
-    # The products of the candidates with the base walls F and with each other, computed at once
+    # The products of the candidates with the base walls F at once, and with the accepted ones as they come
+    # (only a few candidates are accepted)
     Fm = np.array([[int(x) for x in w] for w in F], dtype=object).reshape(len(F), L.rank)
     PF = (CA[keep] @ Fm.T) if keep and len(F) else np.zeros((len(keep), 0), dtype=object)
-    PC = CA[keep] @ C[keep].T if keep else np.zeros((0, 0), dtype=object)
     accepted_idx = []
     for i in range(len(keep)):
-        if (PF[i] >= 0).all() and all(PC[i, j] >= 0 for j in accepted_idx):
+        if not (PF[i] >= 0).all():
+            continue
+        row = CA[keep[i]]
+        if all(row @ C[keep[j]] >= 0 for j in accepted_idx):
             accepted_idx.append(i)
     accepted = list(F) + [cands[keep[i]] for i in accepted_idx]
     if _rank(accepted) != L.rank - 1:
@@ -207,7 +210,7 @@ def _crossing(L: Lattice, a: IMat, b: IMat, found) -> Tuple[IMat, bool, List[IMa
 
 
 def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat = None,
-              max_steps: int = 200) -> Tuple[IMat, bool, List[IMat]]:
+              max_steps: int = 200, use_cpp: bool = True) -> Tuple[IMat, bool, List[IMat]]:
     """Follows x(t) = a + t u, t > 0, from the point a (finite or ideal, in the closure of the chamber) to the
     first mirror, or to the ideal end of the line; walls are known walls, used to predict the end (the result
     does not depend on them). Returns (end, ideal, end_roots), where end_roots are all the roots through a
@@ -229,7 +232,7 @@ def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat 
     if best is not None:
         b = _prim(best.denominator * a + best.numerator * u)
         if L.square(b) > 0:
-            found = edge_crossing_roots(L, a, b, include_end=True, complement=complement)
+            found = edge_crossing_roots(L, a, b, include_end=True, complement=complement, use_cpp=use_cpp)
             # The crossings come first, then the roots through b (t = None)
             if found and found[0][1] is not None:
                 return _crossing(L, a, b, found)
@@ -247,7 +250,7 @@ def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat 
         # t_inf = (c + sqrt(disc)) / (-q)
         z = _prim((-q) * a + (c + s) * u) if s * s == disc else None
     if z is not None:
-        found = edge_crossing_roots(L, a, z, complement=complement)
+        found = edge_crossing_roots(L, a, z, complement=complement, use_cpp=use_cpp)
         if found:
             return _crossing(L, a, z, found)
         return z, True, None
@@ -261,7 +264,7 @@ def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat 
         if len(points) >= 3:
             # (points[-3], b) contains points[-2] in its interior; the previous segment ended at points[-2]
             start = points[-3]
-            found = edge_crossing_roots(L, start, b, complement=complement)
+            found = edge_crossing_roots(L, start, b, complement=complement, use_cpp=use_cpp)
             if found:
                 return _crossing(L, start, b, found)
         if len(points) > max_steps:
@@ -369,11 +372,23 @@ def cusp_edges(L: Lattice, z: IMat, S: List[IMat]) -> List[Tuple[Tuple[int, ...]
     return result
 
 
-def _task_edge(L, max_steps, a, u, C, edge_walls, walls):
-    """Traces an edge from a in the direction u; returns (end, ideal, new wall at a finite end or None)."""
+def _task_edge(L, max_steps, a, u, C, edge_walls, walls, cpp=True):
+    """Traces an edge from a in the direction u; returns (end, ideal, new wall at a finite end or None).
+    With cpp, the edge is traced in C++ (edge_cpp.trace_edge), except for an irrational ideal end (the walk along
+    the river, whose segments are still searched in C++) or if a value might overflow 64/128 bits."""
+    if cpp and edge_cpp is not None:
+        try:
+            code, end, alpha = edge_cpp.trace_edge(L.A.tolist(), int(L.exp), list(a), list(u), [list(w) for w in walls],
+                                                   [list(w) for w in edge_walls])
+            if code == 0:
+                return tuple(end), False, tuple(alpha)
+            if code == 1:
+                return tuple(end), True, None
+        except OverflowError:
+            pass
     a, u = imat(list(a)), imat(list(u))
-    complement = _kernel(L, imat([list(r) for r in C]), u) if C is not None else None
-    end, ideal, end_roots = trace_ray(L, a, u, [imat(list(w)) for w in walls], complement, max_steps)
+    complement = _kernel(L, imat([list(r) for r in C]), u) if C is not None else None  # else computed per search
+    end, ideal, end_roots = trace_ray(L, a, u, [imat(list(w)) for w in walls], complement, max_steps, use_cpp=cpp)
     if ideal:
         return _key(end), True, None
     W = [imat(list(w)) for w in edge_walls]
@@ -381,8 +396,15 @@ def _task_edge(L, max_steps, a, u, C, edge_walls, walls):
     return _key(end), False, _key(alpha)
 
 
-def _task_vertex(L, v, S):
-    """The data of the edges at a new finite vertex: (C, [(j, u_j)])."""
+def _task_vertex(L, v, S, cpp=True):
+    """The data of the edges at a new finite vertex: (C, [(j, u_j)]); C (a reduced basis of L cap v^perp, used by
+    the Python edge task) is None when the directions are computed in C++ (edge_cpp.vertex_directions)."""
+    if cpp and edge_cpp is not None:
+        try:
+            dirs = edge_cpp.vertex_directions(L.A.tolist(), list(v), [list(w) for w in S])
+            return None, [(j, tuple(u)) for j, u in enumerate(dirs)]
+        except OverflowError:
+            pass
     C, edges = finite_vertex_edges(L, imat(list(v)), [imat(list(w)) for w in S])
     return [_key(r) for r in C], [(j, _key(u)) for j, u in edges]
 
@@ -398,25 +420,26 @@ def _task_cusp(L, z, edge_walls, m):
 _WORKER = {}
 
 
-def _init_worker(gram, max_steps):
+def _init_worker(gram, max_steps, cpp=True):
     _WORKER["L"] = Lattice(len(gram), gram)
     _WORKER["max_steps"] = max_steps
+    _WORKER["cpp"] = cpp
 
 
 def _run_task(kind, args):
     L = _WORKER["L"]
     if kind == "edge":
-        return _task_edge(L, _WORKER["max_steps"], *args)
+        return _task_edge(L, _WORKER["max_steps"], *args, cpp=_WORKER["cpp"])
     if kind == "vertex":
-        return _task_vertex(L, *args)
+        return _task_vertex(L, *args, cpp=_WORKER["cpp"])
     return _task_cusp(L, *args)
 
 
 class _InlineExecutor:
     """A stand-in for ProcessPoolExecutor running the tasks immediately in this process."""
 
-    def __init__(self, gram, max_steps):
-        _init_worker(gram, max_steps)
+    def __init__(self, gram, max_steps, cpp=True):
+        _init_worker(gram, max_steps, cpp)
 
     def submit(self, fn, *args):
         future = Future()
@@ -437,23 +460,26 @@ class ChamberTracer:
         vertices: {vector key: {"vector", "walls" (frozenset of indices in walls), "ideal" (bool)}};
         edges: {frozenset of wall indices: [the keys of its two ends]}.
 
+    With cpp (the default), the edges are traced by the C++ module edge_cpp when possible (see _task_edge).
     With threads > 1, the edges, and the new vertices and cusps, are processed by a pool of worker processes:
     the main process only keeps the registries and the queue. The order in which the edges are traced does not
     change the result (the known walls only predict the ends, which are certified by the searches)."""
 
     def __init__(self, L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
-                 max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1):
+                 max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True):
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L
         self.n = L.rank
         self.walls: List[IMat] = []
         self.wall_index: Dict[Tuple[int, ...], int] = {}
+        self.wall_keys: List[Tuple[int, ...]] = []  # the walls as tuples, for the tasks
         self.vertices: Dict[Tuple[int, ...], dict] = {}
         self.edges: Dict[frozenset, list] = {}
         self.max_vertices = max_vertices
         self.max_steps = max_steps
         self.threads = threads
+        self.cpp = cpp
         self.rng = random.Random(seed)
         if base is None:
             from lattice.vinberg.algorithm import Vinberg
@@ -470,6 +496,7 @@ class ChamberTracer:
             if k not in self.wall_index:
                 self.wall_index[k] = len(self.walls)
                 self.walls.append(imat(list(k)))
+                self.wall_keys.append(k)
             idx.append(self.wall_index[k])
         return frozenset(idx)
 
@@ -521,9 +548,9 @@ class ChamberTracer:
         gram = [[int(x) for x in row] for row in L.A.tolist()]
         if self.threads > 1:
             executor = ProcessPoolExecutor(max_workers=self.threads, initializer=_init_worker,
-                                           initargs=(gram, self.max_steps))
+                                           initargs=(gram, self.max_steps, self.cpp))
         else:
-            executor = _InlineExecutor(gram, self.max_steps)
+            executor = _InlineExecutor(gram, self.max_steps, self.cpp)
         pending = {}                 # future -> (kind, data)
         waiting = set()              # the keys of the new vertices whose data are being computed
         queue = []                   # the edges to trace: (edge key, vertex key, u, C)
@@ -596,7 +623,7 @@ class ChamberTracer:
             while queue or pending:
                 while queue and len(pending) < window:
                     ekey, vkey, u, C = queue.pop()
-                    args = (vkey, u, C, [_key(self.walls[i]) for i in sorted(ekey)], [_key(w) for w in self.walls])
+                    args = (vkey, u, C, [self.wall_keys[i] for i in sorted(ekey)], list(self.wall_keys))
                     submit("edge", args, (ekey, vkey))
                 done, _ = wait(list(pending), return_when=FIRST_COMPLETED)
                 for future in done:

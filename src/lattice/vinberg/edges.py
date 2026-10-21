@@ -32,6 +32,10 @@ import flint as fl
 from lattice._matrix import IMat, imat, imat_zero, imat2flz, flz2imat, nrows
 from lattice.lattice import Lattice
 from lattice.enumeration import FPSearch
+try:
+    from lattice import edge_cpp
+except ImportError:  # the C++ extension is not built
+    edge_cpp = None
 
 
 def lll_negative_definite(L: Lattice, B: IMat) -> IMat:
@@ -52,7 +56,7 @@ def _ceil_div(x: Fraction | int, y: Fraction | int) -> int:
 
 
 def edge_crossing_roots(L: Lattice, a: IMat, b: IMat, include_end: bool = False,
-                        complement: IMat = None) -> List[Tuple[IMat, Fraction | None]]:
+                        complement: IMat = None, use_cpp: bool = True) -> List[Tuple[IMat, Fraction | None]]:
     """All the roots of L whose mirrors cross the open segment between a and b (see the module docstring),
     oriented so that (r, a) > 0 > (r, b), as pairs (root, t) sorted by t = (r, a) / |(r, b)|: the crossing
     point is proportional to a + t b, so t increases from a to b.
@@ -60,8 +64,21 @@ def edge_crossing_roots(L: Lattice, a: IMat, b: IMat, include_end: bool = False,
     With include_end=True (b finite), if no root crosses the open segment, the roots through b with the smallest
     (r, a) > 0 are returned instead, as pairs (root, None): they have B = 0, and (x, x) = A^2 q <= 2 exp D
     bounds A, which is scanned upwards until roots are found. complement is an optional LLL-reduced basis of
-    L cap N (N the orthogonal complement of a and b), to avoid recomputing it."""
+    L cap N (N the orthogonal complement of a and b), to avoid recomputing it.
+
+    By default the search runs in C++ (edge_cpp.crossing_roots, the same algorithm with 64-bit integers and
+    checked 128-bit intermediate values; it computes the complement itself), and falls back to this Python
+    implementation if a value might overflow; use_cpp=False uses Python directly (the reference)."""
     a, b = imat([int(x) for x in a]), imat([int(x) for x in b])
+    if use_cpp and edge_cpp is not None:
+        try:
+            found = edge_cpp.crossing_roots(L.A.tolist(), int(L.exp), [int(x) for x in a], [int(x) for x in b],
+                                            include_end)
+        except OverflowError:
+            found = None
+        if found is not None:
+            roots = [(imat(r), None if B == 0 else Fraction(A, -B)) for r, A, B in found]
+            return sorted(roots, key=lambda x: (x[1] is None, x[1] or 0))
     p, q, c = L.square(a), L.square(b), L.product(a, b)
     if p < 0 or q < 0 or c <= 0:
         raise ValueError("a and b must lie in the closed future light cone")
