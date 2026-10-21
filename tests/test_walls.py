@@ -137,3 +137,17 @@ class TestRoots:
         roots = list(flz2imat(fl.fmpz_mat([[1, 0], [0, 1], [1, 1], [-1, 0], [0, -1], [-1, -1]])))
         simple = simple_roots(L, roots)
         assert len(simple) == 2 and Coxeter_graph(L, simple) == {(0, 1): 3}
+
+
+@pytest.mark.parametrize("L, v", [(L, v) for L, v, _ in CUSP_CASES] + [
+    (U_lat() + Lattice(20, (-imat_diag([1] * 20)).tolist()), [1] + [0] * 21),
+])
+def test_cusp_root_classes_nonempty(L, v):
+    """Every class contains roots: some t among m + 1 consecutive values gives a root (the norms of the classes
+    divide 2 exp(L); the sublattices M_k only keep the vectors u with d | 2 (u, M))."""
+    from lattice.vinberg.walls import cusp_root_classes
+    classes = cusp_root_classes(L, imat(v))
+    assert classes
+    for w, step, m in classes:
+        assert (2 * L.exp) % (-L.square(w)) == 0
+        assert any(L.is_root(w + t * step) for t in range(m + 1))

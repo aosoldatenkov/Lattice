@@ -100,3 +100,31 @@ def test_tracing_with_and_without_cpp(L, base, chamber):
     assert {tuple(int(x) for x in w) for w in res["walls"]} == {tuple(int(x) for x in w) for w in ref["walls"]}
     assert (res["vertices"], res["cusps"], res["edges"]) == (ref["vertices"], ref["cusps"], ref["edges"])
     assert set(res["tracer"].vertices) == set(ref["tracer"].vertices)
+
+
+def test_large_coordinates():
+    """Short segments with large coordinates in U + D_20(-1): the C++ search agrees with Python or falls back with
+    OverflowError (a badly conditioned complement used to raise another error)."""
+    from lattice.catalogue import D_lat
+    L = D_lat(20)(-1) + U_lat()
+    A = L.A.tolist()
+    rng = random.Random(3)
+    checked = 0
+    for scale in (3, 300, 30000):
+        done = 0
+        while done < 4:
+            a = imat([rng.randint(-scale, scale) for _ in range(20)] + [rng.randint(1, 8 * scale), rng.randint(1, 8 * scale)])
+            if L.square(a) <= 0:
+                continue
+            b = 3 * a + imat([rng.randint(-2, 2) for _ in range(22)])
+            p, q, c = L.square(a), L.square(b), L.product(a, b)
+            if q <= 0 or c <= 0 or c * c <= p * q:
+                continue
+            done += 1
+            try:
+                found = cpp_roots(L, a, b, False)
+            except OverflowError:
+                continue
+            assert found == as_set(edge_crossing_roots(L, a, b, use_cpp=False))
+            checked += 1
+    assert checked > 0

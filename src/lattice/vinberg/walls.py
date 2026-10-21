@@ -2,10 +2,11 @@ import math
 from fractions import Fraction
 from typing import List
 import numpy as np
-from lattice._matrix import IMat, imat, imat2flz, nrows, flq2imat, inv2x2, euclid
+from lattice._matrix import IMat, imat, imat_diag, imat2flz, nrows, flq2imat, inv2x2, euclid
 from lattice.lattice import Lattice
 from lattice.binary import BinLattice
 from lattice.enumeration import FPSearch
+from lattice.vinberg.edges import lll_negative_definite
 from lattice.vinberg.algorithm import Vinberg
 
 
@@ -35,9 +36,26 @@ def cusp_root_classes(L: Lattice, v: IMat) -> List[tuple]:
     A, T = M.lll(transform=True)
     basis = T @ basis
     M = Lattice(M.rank, A)
-    # The bounds keep a margin of 0.5 from the integer values of -(u, u)
-    FPS = FPSearch(np.array(-A, dtype=float), np.zeros(M.rank, dtype=float), 0.5, 2 * L.exp + 0.5)
-    vecs = FPS.search_all()
+    # A root of norm -d (d | 2 exp(L)) maps to u in M with -(u, u) = d and d | 2 (u, M), i.e. (u, M) in k Z with
+    # k = d / 2 (d even) or k = d (d odd): u lies in the sublattice M_k = {u : (u, M) in k Z}. Enumerating the
+    # vectors of norm d in M_k instead of all the vectors of norm at most 2 exp(L) in M avoids most of the vectors
+    # that cannot be roots (e.g. for M = D_20 and d = 4, the 40 vectors +-2 e_i instead of about 78000).
+    # The bounds keep a margin of 0.5 from the integer values of -(u, u).
+    m = M.rank
+    G = M.A
+    vecs = []
+    for d in range(1, 2 * L.exp + 1):
+        if (2 * L.exp) % d != 0:
+            continue
+        k = d // 2 if d % 2 == 0 else d
+        if k == 1:
+            Bk = imat_diag([1] * m)
+        else:
+            Bk, _ = Lattice.fibre_product(G, k * imat_diag([1] * m))
+            Bk = lll_negative_definite(M, imat([[int(x) for x in row] for row in Bk]))
+        Gk = M.batch_prod(Bk, Bk)
+        for c in FPSearch(np.array(-Gk, dtype=float), np.zeros(m, dtype=float), d - 0.5, d + 0.5).search_all():
+            vecs.append([int(x) for x in imat([int(x) for x in c]) @ Bk])
     if not vecs:
         return []
     # All the products at once: the norms b = -(u, u), the contents of the rows (u, M), the lifts w and 2 (w, dual)

@@ -217,10 +217,18 @@ static MatI lll_negative(const Form& F, MatI B) {
             Bn[i] = s;
         }
     };
+    // A breakdown of the floating-point Gram-Schmidt data (precision lost on large entries) or no convergence:
+    // let the caller fall back to the exact Python implementation (OverflowError)
+    auto check = [&]() {
+        for (int i = 0; i < m; ++i)
+            if (!(Bn[i] > 0) || !std::isfinite((double)Bn[i]))
+                throw std::overflow_error("edge_cpp: LLL lost precision");
+    };
     gram_schmidt(0);
+    check();
     int k = 1, iterations = 0;
     while (k < m) {
-        if (++iterations > 100000) break;  // the reduction only affects the performance
+        if (++iterations > 100000) throw std::overflow_error("edge_cpp: LLL did not converge");
         for (int j = k - 1; j >= 0; --j) {
             long double qd = std::round(mu[k][j]);
             if (qd == 0) continue;
@@ -242,18 +250,24 @@ static MatI lll_negative(const Form& F, MatI B) {
             std::swap(G[k], G[k - 1]);
             for (int i = 0; i < m; ++i) std::swap(G[i][k], G[i][k - 1]);
             gram_schmidt(k - 1);
+            check();
             k = std::max(k - 1, 1);
         }
     }
     return B;
 }
 
-// An LLL-reduced basis of L cap <a, u>^perp: the kernel of (., a) on Z^n, then the kernel of (., u) on it
+// An LLL-reduced basis of L cap <a, u>^perp, for a plane <a, u> of signature (1, 1) with a in the closed future
+// light cone: the kernel of (., t) on Z^n for a timelike t in the plane (a, or a + u if a is isotropic; then u is
+// isotropic too, and (a + u)^2 = 2 (a, u) > 0), which is negative definite and is reduced at once (the extended
+// gcds make the entries grow), then the kernel of (., u) on it, reduced again
 static MatI plane_complement(const Form& F, const Vec& a, const Vec& u) {
     MatI E(F.n, Vec(F.n, 0));
     for (int i = 0; i < F.n; ++i) E[i][i] = 1;
-    MatI K = kernel(F, kernel(F, E, a), u);
-    return lll_negative(F, K);
+    Vec t = a;
+    if (F.prod(a, a) == 0) t = to64v(comb(1, a, 1, u));
+    MatI K = lll_negative(F, kernel(F, E, t));
+    return lll_negative(F, kernel(F, K, u));
 }
 
 // --- the roots crossing a segment ---
@@ -291,7 +305,9 @@ struct Segment {
             for (int i = 0; i < k; ++i)
                 for (int j = 0; j < k; ++j) Q(i, j) = -(double)F.prod(Nb[i], Nb[j]);
             llt.compute(Q);
-            if (llt.info() != Eigen::Success) throw std::runtime_error("The complement of the segment is not definite");
+            // The complement is negative definite; a failure of the floating-point Cholesky factorization means a
+            // badly conditioned basis: fall back to the exact Python implementation (OverflowError)
+            if (llt.info() != Eigen::Success) throw std::overflow_error("edge_cpp: the complement is badly conditioned");
         }
     }
 

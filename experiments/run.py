@@ -37,13 +37,20 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-rank = 20
-L = I_lat(1, 0) + I_lat(0, rank - 1)
+L = D_lat(20)(-1) + U_lat()
 print(L.info())
-print(trace_chamber(L, base=[1] + [0] * (rank - 1),
-                    chamber=[rank ** 2 - i ** 2 for i in range(rank)],
+print(trace_chamber(L, base=[0] * 20 + [1, 1],
                     progress=True,
-                    threads=8))
+                    threads=24))
+
+# rank = 20
+# L = I_lat(1, 0) + I_lat(0, rank - 1)
+# print(L.info())
+# print(trace_chamber(L, base=[1] + [0] * (rank - 1),
+#                     chamber=[rank ** 2 - i ** 2 for i in range(rank)],
+#                     progress=True,
+#                     threads=8))
+
 # walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
 # cert = certify_polytope(L, walls, progress=True)
 # print("Certified:", cert["certified"])
