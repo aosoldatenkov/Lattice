@@ -16,7 +16,7 @@ Code references:
 | The per-edge core in C++ (§7) | `src/cpp/edge_module.cpp` (module `edge_cpp`: `crossing_roots`, `trace_edge`, `edge_direction`, `vertex_directions`, `cusp_walls`) |
 | Roots through a cusp | `src/lattice/vinberg/walls.py` (`cusp_root_classes`, `cusp_walls`; in C++ `edge_cpp.cusp_walls`) |
 | Coxeter diagram of the walls, symmetries (§9) | `src/lattice/vinberg/coxeter.py` (`WallDiagram`, `ChamberSymmetry`; needs `pynauty`) |
-| Tracing and certification up to symmetry (§9) | `src/lattice/vinberg/orbits.py` (`OrbitTracer`, `trace_chamber_by_orbits`, `GroupAction`) |
+| Tracing and certification up to symmetry (§9) | `src/lattice/vinberg/orbits.py` (`OrbitTracer`, `trace_chamber_by_orbits`, `verify_certificate`, `GroupAction`) |
 | Pictures of Coxeter diagrams | `src/lattice/draw/diagram.py` (`CoxeterDiagram`, `draw_Coxeter_diagram`) |
 | Conway's river of a binary lattice | `src/lattice/binary.py` (`BinLattice`) |
 | Root system at a point (height 0 of a search), used for the start vertex | `src/lattice/vinberg/certify.py` (`roots_by_height`) |
@@ -187,6 +187,20 @@ per edge and little per vertex:
 `vertices` (by vector) and `edges` (by the frozenset of their walls, with their two ends) are built from these
 registries on first access, for tests and small chambers.
 
+**The order of the queue** (`order=`). It does not change the result, only how soon the walls are found. The
+default, `"random"`, takes a random entry of the queue (swapped with the last one, $O(1)$; reproducible from `seed`);
+`"dfs"` takes the last one (the edges of the newest vertex first), `"bfs"` the first one. Edges traced until the last
+wall was found (single process):
+
+| Chamber | walls | edges | dfs | bfs | random (5 seeds) |
+|---|---|---|---|---|---|
+| $I_{1,19}$ | 50 | 292340 | > 40000 | 18747 | 1844–3535 |
+| $U \oplus D_8^2$ | 48 | | 19115 | 9957 | 286–1060 |
+
+The depth-first order follows one long path and reaches the walls on the far side of the start late; the
+breadth-first order exhausts the shells around the start, which grow by a factor of about $n$ per step; the random
+order grows an irregular region in all directions and touches the distant facets early.
+
 With `threads > 1` the tasks run in a `ProcessPoolExecutor` (at most $4 \times$ `threads` tasks in flight);
 with `threads = 1` the same loop runs them in the main process. The order in which the tasks complete does
 not change the result: the known walls given to an edge task only predict its end, which its own search
@@ -286,8 +300,25 @@ for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after); and the C++ cor
   representatives, and the numbers of vertices, cusps and edges follow by orbit-stabilizer. Nothing is assumed
   about $G$ (if the known walls are not all the walls, a new wall appears at some vertex: it is added, $G$ is
   recomputed, and the traversal restarts). The orbits are identified by enumerating $G$ (`GroupAction`, vectorized;
-  up to a few million elements): the key of a set of walls is the smallest 64-bit hash of its images, ties broken
-  by the images themselves, so the key is exact. A partial run saves its walls with `ChamberTracer(walls_file=...)`,
+  up to a few million elements times walls): the key of a set of walls is the smallest 64-bit hash of its images,
+  ties broken by the images themselves, so the key is exact. For larger groups (`method="nauty"`, chosen
+  automatically; Borcherds' 960 walls, $|G| = 20643840$), by canonical labeling: on a graph of the walls whose
+  automorphism group is exactly $G$ (the Coxeter edges, if their automorphism group has the order of $G$, which it
+  contains; else the Gram matrix, if all its automorphisms are integral), the walls of the vertex are marked by a
+  color; two vertices are in the same orbit iff the marked graphs have the same canonical form, and the canonical
+  labelings give the element mapping one to the other (checked to preserve the Gram matrix). The certified
+  subgroup is then a sympy permutation group, and the stabilizers for the counts are automorphism groups of the
+  marked graphs (which requires the certified subgroup to be all of $G$).
+
+  **Certificates.** `trace_chamber_by_orbits(..., certificate=path)` saves the result as JSON: the Gram matrix, the
+  start (base, chamber, seed), the walls, the generators of the group (permutations of the walls and integral
+  matrices), the representatives with the sizes of their orbits, and the counts. `verify_certificate(path)`
+  checks it without the wall search or the symmetry search: the generators are integral isometries permuting the
+  walls as stated and preserving the time orientation, of the stated order; the representatives are vertices of
+  the polyhedron of the walls, in distinct orbits; every edge of every representative, traced again, ends in the
+  orbit of a representative, and every representative and the start vertex are reached so (which certifies their
+  walls); the counts by orbit-stabilizer are the stated ones. A verification costs one traversal of the edges of
+  the representatives. A partial run saves its walls with `ChamberTracer(walls_file=...)`,
   and `trace_chamber_by_orbits(L, path)` certifies from them, in the same chamber (same base, chamber and seed).
   Tested against full traversals ($I_{1,14}$, $U \oplus A_2^3$, $U \oplus D_4^3$, $U \oplus E_6^2$, Allcock's
   lattices with diagram symmetries outside $O(L)$).

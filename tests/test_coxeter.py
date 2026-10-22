@@ -70,4 +70,4 @@ def test_tracer_reports_symmetries(capsys):
     res = tracer.run(progress=True, progress_interval=0)
     assert res["symmetry"].order == 6
     assert len(tracer.diagram) == len(tracer.walls) and tracer.diagram.walls == [tuple(int(x) for x in w) for w in tracer.walls]
-    assert "symmetries of the 10 walls: order 6, 4 orbits of walls [3, 3, 3, 1]" in capsys.readouterr().out
+    assert "symmetries of the 10 walls: order 6, 4 orbits of walls [3 x 3, 1]" in capsys.readouterr().out

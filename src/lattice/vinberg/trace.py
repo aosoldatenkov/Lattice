@@ -520,7 +520,11 @@ class ChamberTracer:
     With cpp (the default), the edges are traced by the C++ module edge_cpp when possible (see _task_edge).
     With threads > 1, the edges and the new cusps are processed by a pool of worker processes: the main process
     only keeps the registries and the queue. The order in which the edges are traced does not change the result
-    (the known walls only predict the ends, which are certified by the searches).
+    (the known walls only predict the ends, which are certified by the searches), but it changes how soon the walls
+    are found: order="random" (the default; reproducible from seed) takes a random edge of the queue, "dfs" the last
+    one and "bfs" the first one. With the random order, the explored part grows in all directions and reaches the
+    distant walls early: all the walls of I_{1,19} after 2-4 thousand edges of 292340 (the depth-first order: more
+    than 40000, breadth-first: 19000).
 
     cpp_errors lists the edges (start, walls, dropped walls) and the cusps (cusp, walls of the incoming edge, point
     on it) on which a consistency check failed in C++, computed again in Python. If a task fails, its input is
@@ -543,7 +547,7 @@ class ChamberTracer:
 
     def __init__(self, L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
                  max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True,
-                 symmetry: bool = False, walls_file: str = None):
+                 symmetry: bool = False, walls_file: str = None, order: str = "random"):
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L
@@ -576,6 +580,9 @@ class ChamberTracer:
             if coxeter.pynauty is None:
                 raise ImportError("symmetry=True needs pynauty (pip install pynauty, or lattice[symmetry])")
         self.rng = random.Random(seed)
+        if order not in ("random", "dfs", "bfs"):
+            raise ValueError("order should be 'random', 'dfs' or 'bfs'")
+        self.order = order
         self.seed = seed
         self.walls_file = walls_file
         if base is None:
@@ -620,8 +627,11 @@ class ChamberTracer:
         S = self.symmetries()
         if S is not None:
             sizes = sorted((len(o) for o in S.wall_orbits), reverse=True)
+            # The sizes with multiplicities: [168, 42], [3 x 5, 1 x 2]
+            counts = [(d, sizes.count(d)) for d in sorted(set(sizes), reverse=True)]
+            listed = ", ".join(f"{d}" if c == 1 else f"{d} x {c}" for d, c in counts)
             print(f"[{time.perf_counter() - start:.0f} s] symmetries of the {len(self.walls)} walls: order {S.order}, "
-                  f"{len(sizes)} orbits of walls {sizes}", flush=True)
+                  f"{len(sizes)} orbits of walls [{listed}]", flush=True)
 
     def _pack(self, v) -> bytes | tuple:
         try:
@@ -735,12 +745,32 @@ class ChamberTracer:
         pending = {}                 # future -> (kind, data)
         waiting = {}                 # new cusp key -> the wall masks of the edges reaching it, while its walls
         queue = array("q")           # the edges to trace, (vertex id << _SHIFT) | j
+        head = 0                     # with order="bfs", the first entry not yet taken
+        order_rng = random.Random(f"order {self.seed}")
         traced = 0
         reported = 0                 # the number of walls at the last report of the symmetries
         window = 4 * max(self.threads, 1)
 
         def submit(kind, args, data):
             pending[executor.submit(_run_task, kind, args)] = (kind, data, args)
+
+        def take() -> int:
+            """The next edge to trace: a random entry of the queue (moved from the end), the last one, or the first."""
+            nonlocal head
+            if self.order == "random":
+                i = order_rng.randrange(len(queue))
+                entry = queue[i]
+                queue[i] = queue[-1]
+                queue.pop()
+                return entry
+            if self.order == "dfs":
+                return queue.pop()
+            entry = queue[head]
+            head += 1
+            if head == len(queue) or (head >= 1 << 20 and 2 * head >= len(queue)):
+                del queue[:head]
+                head = 0
+            return entry
 
         def failed(kind, args, error):
             """Saves the input of a failed task (to reproduce it with _task_edge or _task_cusp) and raises."""
@@ -786,9 +816,9 @@ class ChamberTracer:
         else:
             queue.extend(self._register(self._pack(first), [_key(w) for w in walls], False))
         try:
-            while queue or pending:
-                while queue and len(pending) < window:
-                    entry = queue.pop()
+            while len(queue) > head or pending:
+                while len(queue) > head and len(pending) < window:
+                    entry = take()
                     vid, j = entry >> _SHIFT, entry & ((1 << _SHIFT) - 1)
                     if self._done[vid] >> j & 1:
                         continue  # traced from its other end
@@ -800,7 +830,7 @@ class ChamberTracer:
                 if not pending:
                     break
                 done, _ = wait(list(pending), return_when=FIRST_COMPLETED)
-                for future in done:
+                for future in [f for f in pending if f in done]:  # in the order of submission (reproducible)
                     kind, data, args = pending.pop(future)
                     try:
                         result = future.result()
@@ -827,7 +857,7 @@ class ChamberTracer:
                 if progress and now - last >= progress_interval:
                     last = now
                     print(f"[{now - start:.0f} s] {len(self.walls)} walls, {len(self._keys) - self._cusps} vertices, "
-                          f"{self._cusps} cusps, {traced} edges traced, {len(queue) + len(pending)} in the queue",
+                          f"{self._cusps} cusps, {traced} edges traced, {len(queue) - head + len(pending)} in the queue",
                           flush=True)
                     if len(self.walls) != reported:
                         reported = len(self.walls)

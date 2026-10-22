@@ -87,40 +87,77 @@ class WallDiagram:
 
     # --- symmetries ---
 
-    def automorphisms(self) -> Tuple[List[Tuple[int, ...]], int]:
-        """Generators of Aut(G), the permutations s of the walls with G_{s(i) s(j)} = G_ij (as tuples of images),
-        and its order; by nauty."""
+    def nauty_graph(self, kind: str = "gram"):
+        """The colored graph on the walls for nauty, cached (only the coloring changes with set_marked): with
+        kind="gram", its automorphisms are the permutations preserving the Gram matrix (the nonzero products as
+        edge colors 1, ..., m, encoded in the bits of b layers of copies of the walls: vertex (i, l) is i + l k;
+        the copies of a wall are joined in a path); with kind="coxeter", one layer and the pairs with an angle or
+        parallel (0 < cos^2 <= 1) as edges, whose automorphisms contain those of the Gram matrix. The vertices are
+        colored by the layer and the norm (and the marked walls, see set_marked)."""
         if pynauty is None:
             raise ImportError("The symmetries need pynauty (pip install pynauty, or lattice[symmetry])")
-        k = len(self.walls)
-        if k <= 1:
-            return [], 1
-        # The nonzero products as edge colors 1, ..., m, encoded in the bits of b layers of copies of the vertices
-        # (vertex (i, l) is i + l k; the copies of a vertex are joined in a path, and the layers and the norms
-        # are vertex colors, so that the automorphisms preserve the layers)
-        values = sorted({self.gram[i][j] for i in range(k) for j in range(i + 1, k)} - {0})
-        code = {v: c + 1 for c, v in enumerate(values)}
-        b = max(1, (len(values)).bit_length())
+        cache = self.__dict__.setdefault("_nauty", {})
+        if kind in cache and cache[kind][2] == len(self.walls):
+            return cache[kind][0]
+        k, G = len(self.walls), self.gram
+        if kind == "gram":
+            values = sorted({G[i][j] for i in range(k) for j in range(i + 1, k)} - {0})
+            code = {v: c + 1 for c, v in enumerate(values)}
+            b = max(1, len(values).bit_length())
+        elif kind == "coxeter":
+            code, b = None, 1
+        else:
+            raise ValueError("kind should be 'gram' or 'coxeter'")
         adj = {v: [] for v in range(b * k)}
         for i in range(k):
             for layer in range(b - 1):
                 adj[i + layer * k].append(i + (layer + 1) * k)
             for j in range(i + 1, k):
-                c = code.get(self.gram[i][j], 0)
+                if code is not None:
+                    c = code.get(G[i][j], 0)
+                elif G[i][j] != 0 and G[i][j] ** 2 <= G[i][i] * G[j][j]:
+                    c = 1
+                else:
+                    c = 0
                 for layer in range(b):
                     if c >> layer & 1:
                         adj[i + layer * k].append(j + layer * k)
+        g = pynauty.Graph(b * k, directed=False, adjacency_dict=adj)
+        cache[kind] = (g, b, k)
+        self.set_marked(g, (), kind)
+        return g
+
+    def set_marked(self, g, marked, kind: str = "gram") -> tuple:
+        """Colors the vertices of the graph of nauty_graph(kind) by the layer, the norm and whether the wall is in
+        marked; returns the sizes of the color classes (a part of the canonical form: nauty's certificate is the
+        adjacency matrix of the canonically labeled graph)."""
+        _, b, k = self.__dict__["_nauty"][kind]
+        marked = set(marked)
         norms = self.norms()
-        colors = []
+        cells = []
         for layer in range(b):
             for d in sorted(set(norms)):
-                colors.append({i + layer * k for i in range(k) if norms[i] == d})
-        g = pynauty.Graph(b * k, directed=False, adjacency_dict=adj, vertex_coloring=colors)
+                for m in (True, False):
+                    cell = {i + layer * k for i in range(k) if norms[i] == d and (i in marked) == m}
+                    if cell:
+                        cells.append(cell)
+        g.set_vertex_coloring(cells)
+        return tuple(len(c) for c in cells)
+
+    def automorphisms(self, kind: str = "gram") -> Tuple[List[Tuple[int, ...]], int]:
+        """Generators of the automorphism group of the graph of nauty_graph(kind) (by default Aut(G), the
+        permutations s of the walls with G_{s(i) s(j)} = G_ij), as tuples of images, and its order; by nauty."""
+        k = len(self.walls)
+        if k <= 1:
+            return [], 1
+        g = self.nauty_graph(kind)
+        self.set_marked(g, (), kind)
         gens, size1, size2, _, _ = pynauty.autgrp(g)
         perms = [tuple(p[:k]) for p in gens]
-        for s in perms:
-            if any(self.gram[s[i]][s[j]] != self.gram[i][j] for i in range(k) for j in range(i, k)):
-                raise RuntimeError("nauty returned a permutation not preserving the Gram matrix")
+        if kind == "gram":
+            for s in perms:
+                if any(self.gram[s[i]][s[j]] != self.gram[i][j] for i in range(k) for j in range(i, k)):
+                    raise RuntimeError("nauty returned a permutation not preserving the Gram matrix")
         return perms, round(size1 * 10 ** size2)
 
     def _basis(self) -> Tuple[List[int], fl.fmpq_mat]:

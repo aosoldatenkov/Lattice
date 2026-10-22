@@ -6,7 +6,7 @@ import pytest
 from lattice.lattice import Lattice
 from lattice.catalogue import A_lat, D_lat, U_lat, I_lat
 from lattice.vinberg.trace import ChamberTracer, trace_chamber, load_walls
-from lattice.vinberg.orbits import GroupAction, OrbitTracer, trace_chamber_by_orbits
+from lattice.vinberg.orbits import GroupAction, OrbitTracer, trace_chamber_by_orbits, verify_certificate
 
 pytest.importorskip("pynauty")
 
@@ -101,3 +101,73 @@ def test_walls_file(tmp_path):
     assert data["seed"] == 3 and len(data["walls"]) == len(tracer.walls) == 17
     res = trace_chamber_by_orbits(L, path)
     assert (res["walls"], res["vertices"], res["edges"]) == (17, tracer.result["vertices"], tracer.result["edges"])
+
+
+@pytest.mark.parametrize("L, base", [
+    (I_lat(1, 14), [1] + [0] * 14),
+    (U_lat() + D4 + D4 + D4, None),
+])
+def test_nauty_method(L, base):
+    """Orbits identified by canonical labeling (for groups too large to enumerate): the same result."""
+    walls = trace_chamber(L, base=base)["walls"]
+    ref = trace_chamber_by_orbits(L, walls, base=base, method="enumerate")
+    res = trace_chamber_by_orbits(L, walls, base=base, method="nauty")
+    for key in ("walls", "vertices", "cusps", "edges", "orbits", "certified_order"):
+        assert res[key] == ref[key]
+    assert res["certified_order"] == res["group_order"]
+
+
+def test_nauty_method_needs_integral_symmetries():
+    L = Lattice(3, [[1, 0, 0], [0, -32, 0], [0, 0, -64]])  # Allcock 160.12
+    with pytest.raises(ValueError):
+        OrbitTracer(L, trace_chamber(L)["walls"], method="nauty")
+
+
+@pytest.mark.parametrize("L, base, method", [
+    (U_lat() + D4 + D4 + D4, None, "enumerate"),
+    (I_lat(1, 14), [1] + [0] * 14, "nauty"),
+])
+def test_certificate(L, base, method, tmp_path):
+    """A certificate is verified by retracing the edges of its representatives; the counts are those of the run."""
+    path = str(tmp_path / "cert.json")
+    walls = trace_chamber(L, base=base)["walls"]
+    res = trace_chamber_by_orbits(L, walls, base=base, method=method, certificate=path)
+    ver = verify_certificate(path, method=method)
+    assert ver["verified"] is True
+    for key in ("walls", "vertices", "cusps", "edges", "orbits", "certified_order"):
+        assert ver[key] == res[key]
+
+
+def test_certificate_tampering(tmp_path):
+    """Wrong counts, a missing representative, a wrong generator or a missing wall are detected."""
+    import json
+    L = U_lat() + A2 + A2 + A2
+    path = str(tmp_path / "cert.json")
+    trace_chamber_by_orbits(L, trace_chamber(L)["walls"], certificate=path)
+    with open(path) as f:
+        data = json.load(f)
+
+    def check(change):
+        bad = json.loads(json.dumps(data))
+        change(bad)
+        bad_path = str(tmp_path / "bad.json")
+        with open(bad_path, "w") as f:
+            json.dump(bad, f)
+        with pytest.raises(RuntimeError):
+            verify_certificate(bad_path)
+
+    check(lambda d: d["counts"].update(edges=d["counts"]["edges"] + 1))
+    check(lambda d: d["representatives"].pop())
+    check(lambda d: d["representatives"][0].update(orbit=d["representatives"][0]["orbit"] + 1))
+    check(lambda d: d["group"]["generators"][0]["matrix"][0].__setitem__(0, d["group"]["generators"][0]["matrix"][0][0] + 1))
+    # A missing wall: the walls of the certificate are not those of the chamber
+    missing = data["walls"][-1]
+
+    def drop_wall(d):
+        i = d["walls"].index(missing)
+        d["walls"].pop(i)
+        for g in d["group"]["generators"]:
+            g["perm"] = [x - (x > i) for x in g["perm"] if x != i]
+        for r in d["representatives"]:
+            r["walls"] = [x - (x > i) for x in r["walls"] if x != i]
+    check(drop_wall)

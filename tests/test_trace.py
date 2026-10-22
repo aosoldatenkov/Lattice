@@ -171,3 +171,20 @@ def test_failed_task_input_saved(monkeypatch):
         saved = json.load(f)
     os.remove(path)
     assert saved["kind"] == "edge" and len(saved["args"][0]) == 5 and saved["gram"][0][0] == 1
+
+
+@pytest.mark.parametrize("order", ["random", "dfs", "bfs"])
+def test_orders(order):
+    """The order of the queue changes when the walls are found, not the result; the random order is reproducible."""
+    L, base, chamber = I_lat(1, 10), [1] + [0] * 10, [121 - i ** 2 for i in range(11)]
+    ref = trace_chamber(L, base=base, chamber=chamber, order="dfs")
+    res = trace_chamber(L, base=base, chamber=chamber, order=order)
+    assert keys(res["walls"]) == keys(ref["walls"])
+    assert (res["vertices"], res["cusps"], res["edges"]) == (ref["vertices"], ref["cusps"], ref["edges"])
+    again = trace_chamber(L, base=base, chamber=chamber, order=order)
+    assert [tuple(int(x) for x in w) for w in again["walls"]] == [tuple(int(x) for x in w) for w in res["walls"]]
+
+
+def test_bad_order():
+    with pytest.raises(ValueError):
+        ChamberTracer(I_lat(1, 4), base=[1, 0, 0, 0, 0], order="lifo")

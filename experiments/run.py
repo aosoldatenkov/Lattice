@@ -40,21 +40,45 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-L = D_lat(20)(-1) + U_lat()
-print(L.info())
+# L = D_lat(20)(-1) + U_lat()
+# print(L.info())
 # res = trace_chamber(L, base=[0] * 20 + [1, 1],
 #                     chamber=[22 ** 3 - i ** 3 for i in range(22)],
 #                     symmetry=True,
 #                     progress=True,
 #                     threads=24,
-#                     walls_file="../output/D20U_walls.json")
+#                     walls_file="../output/D20U_walls_new.json")
 
-res = trace_chamber_by_orbits(L, "../output/D20U_walls.json", threads=24, progress=True)
-print(res)
+# res = trace_chamber_by_orbits(L, "../output/D20U_walls.json", threads=24, progress=True)
+# print(res)
 # walls = load_walls("../output/D20U_walls.json")
 # fname = "../output/D20U"
 # D = draw_Coxeter_diagram(L, walls['walls'], fname + ".html")
 # D.draw(fname + ".pdf", ultraparallel=False)
+
+G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+          [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+          [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+          [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+          [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
+gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
+for v in product(range(2), repeat=5):
+    gens.append([x % 2 for x in (imat(v) @ G).tolist()])
+basis = Lattice.image(imat(gens))
+K = Lattice(16, basis @ basis.transpose() // 2)
+L = K(-1) + U_lat()
+print(L.info())
+print(Genus(L).str())
+
+res = trace_chamber_by_orbits(L, "../output/Borcherds17_walls.json", threads=24, progress=True)
+print(res)
+
+
+# res = trace_chamber(L, base=[0] * 16 + [1, 1],
+#                     symmetry=True,
+#                     progress=True,
+#                     threads=24,
+#                     walls_file="../output/Borcherds17_walls.json")
 
 # rank = 20
 # L = I_lat(1, 0) + I_lat(0, rank - 1)
@@ -72,20 +96,6 @@ print(res)
 # cert = certify_polytope(L, walls, progress=True)
 # print("Certified:", cert["certified"])
 # print("Violations:", cert["violations"])
-
-# G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-#           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-#           [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-#           [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-#           [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
-# gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
-# for v in product(range(2), repeat=5):
-#     gens.append([x % 2 for x in (imat(v) @ G).tolist()])
-# basis = Lattice.image(imat(gens))
-# K = Lattice(16, basis @ basis.transpose() // 2)
-# L = U_lat() + K(-1)
-# print(L.info())
-# print(Genus(L).str())
 
 # RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=2)
 

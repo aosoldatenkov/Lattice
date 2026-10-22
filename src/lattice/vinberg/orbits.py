@@ -22,11 +22,13 @@ known walls are incomplete: it is added, the group is recomputed, and the traver
 """
 from __future__ import annotations
 import json
+import os
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Dict, List, Sequence, Tuple
 import numpy as np
+import flint as fl
 from lattice._matrix import IMat, imat
 from lattice.lattice import Lattice
 from lattice.vinberg.coxeter import WallDiagram, ChamberSymmetry
@@ -136,6 +138,111 @@ class GroupAction:
         return mask
 
 
+class _EnumeratedOrbits:
+    """Orbits of sets of walls under an enumerated group G (GroupAction), and the certified subgroup H as a boolean
+    mask over its elements."""
+
+    def __init__(self, generators, k: int, order: int):
+        self.G = GroupAction(generators, k, order)
+        self.order = self.G.order
+        self.H = np.zeros(self.order, dtype=bool)
+        self.H[0] = True
+        self._gens: List[int] = []
+
+    def key(self, S):
+        """The key of the orbit of the set S, and a token for transporter()."""
+        return self.G.canonical(S)
+
+    def transporter(self, token_u, token_w) -> np.ndarray:
+        """An element mapping the set of token_u to the set of token_w (same key): e_w(S_w) = e_u(S_u)."""
+        el = self.G.elements
+        return np.argsort(el[token_w]).astype(el.dtype)[el[token_u]]
+
+    def certify(self, g):
+        i = self.G.index(g)
+        if not self.H[i]:
+            self.H = self.G.extend(self.H, self._gens, i)
+
+    def certified_order(self) -> int:
+        return int(self.H.sum())
+
+    def stabilizer(self, S) -> int:
+        """The order of the stabilizer of the set S in H."""
+        return self.G.stabilizer_mask(S, self.H)
+
+    def wall_closure(self, walls) -> List[int]:
+        """The union of the H-orbits of the given walls."""
+        return sorted({int(x) for x in np.unique(self.G.elements[self.H][:, list(walls)])})
+
+
+class _CanonicalOrbits:
+    """Orbits of sets of walls under G = Sym of the known walls, by canonical labeling (nauty), for groups too
+    large to enumerate: a graph on the walls whose automorphism group is exactly G (the graph of the Coxeter edges
+    if its automorphism group has the order of G, which contains G; else the Gram matrix, whose automorphism group
+    is G if all its elements are integral), with the walls of S marked by a color: two sets are in the same orbit iff
+    the marked graphs are isomorphic, i.e. have the same canonical form, and the two canonical labelings give an
+    element mapping one to the other. The certified subgroup H is a sympy permutation group."""
+
+    def __init__(self, diagram: WallDiagram, symmetry: ChamberSymmetry):
+        from sympy.combinatorics import Permutation, PermutationGroup
+        self._Permutation, self._PermutationGroup = Permutation, PermutationGroup
+        self.diagram, self.symmetry = diagram, symmetry
+        self.order = symmetry.order
+        self.k = len(diagram)
+        for kind in ("coxeter", "gram"):
+            if diagram.automorphisms(kind)[1] == self.order:
+                break
+        else:
+            raise ValueError("Some symmetries of the diagram of the walls are not integral: canonical labeling "
+                             "cannot identify the orbits (use method='enumerate' if the group is small enough)")
+        self.kind = kind
+        self.graph = diagram.nauty_graph(kind)
+        self.H = PermutationGroup([Permutation(list(range(self.k)))])
+        self.H_order = 1
+
+    def key(self, S):
+        import pynauty
+        sizes = self.diagram.set_marked(self.graph, S, self.kind)
+        return (sizes, pynauty.certificate(self.graph)), pynauty.canon_label(self.graph)
+
+    def transporter(self, token_u, token_w) -> np.ndarray:
+        # The canonical labelings lab (lab[i]: the vertex at the canonical position i) give the isomorphism
+        # lab_u[i] -> lab_w[i]; the walls are the vertices of the first layer
+        g = np.empty(self.k, dtype=np.int64)
+        for a, b in zip(token_u, token_w):
+            if a < self.k:
+                g[a] = b
+        return g
+
+    def certify(self, g):
+        if self.H_order == self.order:
+            return
+        p = self._Permutation([int(x) for x in g])
+        if not self.H.contains(p):
+            self.H = self._PermutationGroup(list(self.H.generators) + [p])
+            self.H_order = int(self.H.order())
+
+    def certified_order(self) -> int:
+        return self.H_order
+
+    def _require_all(self):
+        if self.H_order != self.order:
+            raise RuntimeError(f"The certified symmetries have order {self.H_order} < {self.order}: the counts by "
+                               f"orbits need their stabilizers (not implemented for groups too large to enumerate)")
+
+    def stabilizer(self, S) -> int:
+        import pynauty
+        self._require_all()
+        self.diagram.set_marked(self.graph, S, self.kind)
+        _, size1, size2, _, _ = pynauty.autgrp(self.graph)
+        return round(size1 * 10 ** size2)
+
+    def wall_closure(self, walls) -> List[int]:
+        self._require_all()
+        walls = set(walls)
+        return sorted(w for o in self.symmetry.wall_orbits if walls & set(o) for w in o)
+
+
 class _NewWall(Exception):
     def __init__(self, wall):
         self.wall = wall
@@ -144,6 +251,9 @@ class _NewWall(Exception):
 class OrbitTracer:
     """Traces and certifies the chamber of L up to the symmetries of the known walls (see the module docstring).
         walls: the known walls (e.g. those of a partial run); symmetry: their ChamberSymmetry (computed if None);
+        method: how the orbits of vertices are identified: "enumerate" (the elements of the group, up to a few
+            million elements times walls), "nauty" (canonical labeling of the Coxeter diagram with the walls of the
+            vertex marked, for large groups; needs all the symmetries of the diagram to be integral), or "auto";
         base, chamber, seed: as for ChamberTracer, the start of the traversal (the start vertex must lie in the
             chamber of the known walls: pass those of the run which found them); threads, cpp, max_steps: as there.
     After run(), representatives lists the representative vertices: {"vector", "walls" (sorted indices in walls),
@@ -151,13 +261,20 @@ class OrbitTracer:
 
     def __init__(self, L: Lattice, walls: Sequence, symmetry: ChamberSymmetry = None, base=None, chamber=None,
                  seed: int = 0, threads: int = 1, cpp: bool = True, max_steps: int = 200,
-                 max_representatives: int = None):
+                 max_representatives: int = None, method: str = "auto", representatives: Sequence[dict] = None):
         self.L = L
+        # With representatives (from a certificate, see verify_certificate): no new representative is accepted, every
+        # end must lie in the orbit of one of them, and each of them must be reached
+        self._fixed = list(representatives) if representatives is not None else None
+        self._chamber, self._seed = chamber, seed
         self.n = L.rank
         self.threads = threads
         self.cpp = cpp
         self.max_steps = max_steps
         self.max_representatives = max_representatives
+        if method not in ("auto", "enumerate", "nauty"):
+            raise ValueError("method should be 'auto', 'enumerate' or 'nauty'")
+        self.method = method
         start = ChamberTracer(L, base=base, chamber=chamber, seed=seed, threads=1, cpp=cpp, max_steps=max_steps)
         self.base = start.base
         # The start vertex, once (the descent chooses the chamber at the base point at random if it lies on mirrors)
@@ -180,7 +297,14 @@ class OrbitTracer:
             except ValueError:  # the walls do not span the space: no symmetries yet
                 symmetry = ChamberSymmetry(len(self.walls), [], 1, 1)
         self.symmetry = symmetry
-        self.group = GroupAction([s for s, _ in self.symmetry.generators], len(self.walls), self.symmetry.order)
+        k, order = len(self.walls), symmetry.order
+        method = self.method
+        if method == "auto":
+            method = "enumerate" if order * k * 10 <= 2 * 10 ** 9 else "nauty"
+        if method == "enumerate":
+            self.orbits = _EnumeratedOrbits([s for s, _ in symmetry.generators], k, order)
+        else:
+            self.orbits = _CanonicalOrbits(self.diagram, symmetry)
 
     def _indices(self, walls) -> List[int]:
         idx = []
@@ -200,6 +324,8 @@ class OrbitTracer:
                 result = self._run(progress, progress_interval, t0)
                 break
             except _NewWall as e:
+                if self._fixed is not None:
+                    raise RuntimeError(f"A wall {e.wall} outside the walls of the certificate") from None
                 self.restarts += 1
                 if progress:
                     print(f"[{time.perf_counter() - t0:.0f} s] a new wall {e.wall}: {len(self.walls) + 1} walls, "
@@ -215,7 +341,7 @@ class OrbitTracer:
         return result
 
     def _run(self, progress, progress_interval, t0) -> dict:
-        L, G = self.L, self.group
+        L, O = self.L, self.orbits
         last = time.perf_counter()
         gram = [[int(x) for x in row] for row in L.A.tolist()]
         if self.threads > 1:
@@ -224,17 +350,15 @@ class OrbitTracer:
         else:
             executor = _InlineExecutor(gram, self.max_steps, self.cpp)
         reps: List[dict] = []
-        rep_of: Dict[Tuple[int, ...], int] = {}  # canonical image -> representative
-        canon_elt: List[int] = []                # for each representative, an element mapping it to its canonical image
+        rep_of: Dict[object, int] = {}           # key of an orbit -> representative
+        rep_token: List[object] = []             # for each representative, its token (see the orbits classes)
         pending = {}
         queue: List[Tuple[int, int]] = []        # (representative, position of the edge)
-        certified = set()                        # positions in G.elements of the certified elements
-        H = np.zeros(G.order, dtype=bool)
-        H[0] = True
-        H_gens: List[int] = []
+        wall_gram = np.array(self.diagram.gram, dtype=object)
+        if wall_gram.size and np.abs(wall_gram).max() < 2 ** 62:
+            wall_gram = wall_gram.astype(np.int64)
         traced = 0
         window = 4 * max(self.threads, 1)
-        inverse = lambda a: np.argsort(a).astype(a.dtype)
 
         def submit(kind, args, data):
             pending[executor.submit(_run_task, kind, args)] = (kind, data, args)
@@ -252,32 +376,59 @@ class OrbitTracer:
                 return [([w for w in S if w not in d], list(d)) for d in drops]
             return [([w for w in S if w != j], [j]) for j in S]
 
-        def arrive(vector, S, ideal, drops):
-            """A traced vertex with walls S: identified with a representative (certifying the element), or new."""
-            nonlocal H
-            S = sorted(S)
-            image, e = G.canonical(S)
-            if image in rep_of:
-                u = rep_of[image]
-                # e(S) = c_u(S_u): g = e^-1 c_u maps S_u to S
-                g = inverse(G.elements[e])[G.elements[canon_elt[u]]]
-                gi = G.index(g)
-                if gi not in certified:
-                    certified.add(gi)
-                    if not H[gi]:
-                        H = G.extend(H, H_gens, gi)
-                return
-            if self.max_representatives is not None and len(reps) >= self.max_representatives:
-                raise RuntimeError(f"More than {self.max_representatives} orbits of vertices")
+        def register(vector, S, ideal, drops, key, token):
             rid = len(reps)
             rep = {"vector": tuple(int(x) for x in vector), "walls": tuple(S), "ideal": ideal,
                    "drops": [tuple(d) for d in drops] if ideal else None}
             rep["edges"] = edges_of(S, ideal, rep["drops"])
             rep["degree"] = len(rep["edges"])
             reps.append(rep)
-            rep_of[image] = rid
-            canon_elt.append(e)
+            rep_of[key] = rid
+            rep_token.append(token)
             queue.extend((rid, j) for j in range(rep["degree"]))
+
+        def arrive(vector, S, ideal, drops):
+            """A traced vertex with walls S: identified with a representative (certifying the element), or new."""
+            S = sorted(S)
+            key, token = O.key(S)
+            if key in rep_of:
+                u = rep_of[key]
+                reached[u] = True
+                g = O.transporter(rep_token[u], token)
+                # g maps the walls of u to those of the vertex, and is a symmetry of the walls
+                if sorted(int(g[i]) for i in reps[u]["walls"]) != S or not (wall_gram[np.ix_(g, g)] == wall_gram).all():
+                    raise RuntimeError("An identification of vertices does not give a symmetry of the walls")
+                O.certify(g)
+                return
+            if self._fixed is not None:
+                raise RuntimeError(f"The vertex {tuple(int(x) for x in vector)} is not in the orbit of a representative "
+                                   f"of the certificate")
+            if self.max_representatives is not None and len(reps) >= self.max_representatives:
+                raise RuntimeError(f"More than {self.max_representatives} orbits of vertices")
+            register(vector, S, ideal, drops, key, token)
+            reached.append(True)
+
+        reached: List[bool] = []
+        if self._fixed is not None:
+            # The representatives of a certificate: vertices orthogonal to their walls (on their positive side), in
+            # distinct orbits; their edges from their walls (for a cusp, the affine diagram, see cusp_edges)
+            for r in self._fixed:
+                v, S = imat([int(x) for x in r["vector"]]), sorted(int(i) for i in r["walls"])
+                ideal = L.square(v) == 0
+                if bool(r["ideal"]) != ideal or (not ideal and L.square(v) < 0):
+                    raise RuntimeError("A representative of the certificate is not a vertex of the right kind")
+                if any(L.product(v, self.walls[i]) != 0 for i in S) or any(L.product(v, w) < 0 for w in self.walls):
+                    raise RuntimeError("A representative of the certificate is not a vertex of the polyhedron of its walls")
+                drops = None
+                if ideal:
+                    drops = [tuple(S[i] for i in d) for d, _ in cusp_edges(L, v, [self.walls[i] for i in S])]
+                elif len(S) != self.n - 1 or fl.fmpz_mat([list(self.wall_keys[i]) for i in S]).rank() != self.n - 1:
+                    raise RuntimeError("A finite representative of the certificate does not have n - 1 independent walls")
+                key, token = O.key(S)
+                if key in rep_of:
+                    raise RuntimeError("Two representatives of the certificate are in the same orbit")
+                register(v, S, ideal, drops, key, token)
+                reached.append(False)
 
         # The start vertex
         v, walls, ideal = self._start
@@ -299,7 +450,7 @@ class OrbitTracer:
                 if not pending:
                     break
                 done, _ = wait(list(pending), return_when=FIRST_COMPLETED)
-                for future in done:
+                for future in [f for f in pending if f in done]:  # in the order of submission (reproducible)
                     kind, data, args = pending.pop(future)
                     try:
                         result = future.result()
@@ -324,19 +475,21 @@ class OrbitTracer:
                     last = now
                     print(f"[{now - t0:.0f} s] {len(reps)} orbits of vertices ({sum(r['ideal'] for r in reps)} of "
                           f"cusps), {traced} edges traced, {len(queue) + len(pending)} in the queue; certified "
-                          f"symmetries: order {int(H.sum())} of {G.order}", flush=True)
+                          f"symmetries: order {O.certified_order()} of {O.order}", flush=True)
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
-        return self._summary(reps, H, traced)
+        if not all(reached):
+            raise RuntimeError(f"{reached.count(False)} representatives of the certificate are not reached")
+        return self._summary(reps, traced)
 
-    def _summary(self, reps, H, traced) -> dict:
+    def _summary(self, reps, traced) -> dict:
         """The numbers of walls, vertices, cusps and edges of the chamber, from the H-orbits of the
         representatives (orbit-stabilizer)."""
-        G = self.group
-        order_H = int(H.sum())
+        O = self.orbits
+        order_H = O.certified_order()
         vertices = cusps = degree_sum = 0
         for rep in reps:
-            stab = G.stabilizer_mask(rep["walls"], H)
+            stab = O.stabilizer(rep["walls"])
             if order_H % stab:
                 raise RuntimeError("The stabilizer of a representative does not divide the order of the group")
             rep["orbit"] = order_H // stab
@@ -348,21 +501,96 @@ class OrbitTracer:
         if degree_sum % 2:
             raise RuntimeError("The edges at the vertices do not pair up")
         # The walls of C: the H-orbits of the walls at the representatives
-        at_reps = sorted({w for rep in reps for w in rep["walls"]})
-        Hel = G.elements[H]
-        wall_set = sorted({int(x) for x in np.unique(Hel[:, at_reps])})
+        wall_set = O.wall_closure({w for rep in reps for w in rep["walls"]})
         self.representatives = reps
         self.chamber_walls = [self.walls[i] for i in wall_set]
         return {"walls": len(wall_set), "known_walls": len(self.walls), "vertices": vertices, "cusps": cusps,
-                "edges": degree_sum // 2, "orbits": len(reps), "traced": traced, "group_order": G.order,
+                "edges": degree_sum // 2, "orbits": len(reps), "traced": traced, "group_order": O.order,
                 "certified_order": order_H, "chamber_walls": self.chamber_walls}
 
 
+CERTIFICATE_FORMAT = "lattice.vinberg.orbits certificate 1"
+
+
+def _save_certificate(tracer: "OrbitTracer", path: str):
+    """Writes the certificate of a completed OrbitTracer run (JSON): the lattice, the start of the traversal, the
+    walls, the generators of the symmetry group (permutations of the walls and integral matrices, r_i M = r_{s(i)}),
+    the representatives of the orbits of vertices with the sizes of their orbits, and the counts."""
+    res, sym = tracer.result, tracer.symmetry
+    data = {"format": CERTIFICATE_FORMAT,
+            "gram": [[int(x) for x in row] for row in tracer.L.A.tolist()],
+            "base": [int(x) for x in tracer.base],
+            "chamber": [int(x) for x in tracer._chamber] if tracer._chamber is not None else None,
+            "seed": tracer._seed,
+            "walls": [list(w) for w in tracer.wall_keys],
+            "group": {"order": sym.order, "aut_order": sym.aut_order, "index": sym.index,
+                      "generators": [{"perm": [int(x) for x in s], "matrix": [[int(x) for x in row] for row in M.tolist()]}
+                                     for s, M in sym.generators]},
+            "representatives": [{"vector": list(r["vector"]), "walls": list(r["walls"]), "ideal": bool(r["ideal"]),
+                                 "orbit": int(r["orbit"])} for r in tracer.representatives],
+            "counts": {key: int(res[key]) for key in ("walls", "vertices", "cusps", "edges", "orbits",
+                                                      "certified_order")}}
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def verify_certificate(path: str, threads: int = 1, progress: bool = False, cpp: bool = True,
+                       method: str = "auto") -> dict:
+    """Checks a certificate written by trace_chamber_by_orbits(certificate=...) and returns the summary of the
+    verification (as OrbitTracer.run(), with "verified": True); raises RuntimeError if it does not hold. Nothing is
+    taken from the file except as data to check:
+      - the generators are integral isometries of L permuting the walls as stated and preserving the time
+        orientation, and generate a group of the stated order;
+      - the representatives are vertices of the polyhedron of the walls, in distinct orbits, and every edge of
+        every representative, traced again (the searches of trace.py), ends in the orbit of a representative;
+        every representative is reached so, and the start vertex (the descent from the stated base point) too:
+        so the representatives are vertices of the chamber with the stated walls, and their orbits under the
+        certified symmetries are its 1-skeleton (see the module docstring);
+      - the counts by orbit-stabilizer are the stated ones."""
+    with open(path) as f:
+        data = json.load(f)
+    if data.get("format") != CERTIFICATE_FORMAT:
+        raise ValueError("Not a certificate of lattice.vinberg.orbits")
+    L = Lattice(len(data["gram"]), data["gram"])
+    walls = data["walls"]
+    k = len(walls)
+    A = fl.fmpz_mat(data["gram"])
+    W = fl.fmpz_mat(walls)
+    b = fl.fmpz_mat([data["base"]])
+    gens = []
+    for g in data["group"]["generators"]:
+        s, M = g["perm"], fl.fmpz_mat(g["matrix"])
+        if sorted(s) != list(range(k)) or M * A * M.transpose() != A:
+            raise RuntimeError("A generator of the certificate is not an isometry permuting the walls")
+        if W * M != fl.fmpz_mat([walls[i] for i in s]) or (b * M * A * b.transpose())[0, 0] <= 0:
+            raise RuntimeError("A generator of the certificate does not map the walls as stated, or reverses the time")
+        gens.append((tuple(s), imat(g["matrix"])))
+    group = data["group"]
+    symmetry = ChamberSymmetry(k, gens, group["aut_order"], group["index"])
+    if symmetry.order != group["order"]:
+        raise RuntimeError("The generators of the certificate do not generate a group of the stated order")
+    tracer = OrbitTracer(L, walls, symmetry=symmetry, base=data["base"], chamber=data["chamber"], seed=data["seed"],
+                         threads=threads, cpp=cpp, method=method, representatives=data["representatives"])
+    res = tracer.run(progress=progress)
+    for key, value in data["counts"].items():
+        if res[key] != value:
+            raise RuntimeError(f"The certificate states {value} {key}, the verification finds {res[key]}")
+    for r, ref in zip(tracer.representatives, data["representatives"]):
+        if r["orbit"] != ref["orbit"]:
+            raise RuntimeError("The orbit of a representative does not have the stated size")
+    res["verified"] = True
+    res["tracer"] = tracer
+    return res
+
+
 def trace_chamber_by_orbits(L: Lattice, walls: Sequence | str, base=None, chamber=None, progress: bool = False,
-                            threads: int = 1, **kwargs) -> dict:
+                            threads: int = 1, certificate: str = None, **kwargs) -> dict:
     """Certifies the chamber of L by tracing one vertex per orbit of the symmetries of the known walls (see the
     module docstring); returns the summary of OrbitTracer.run(), with the tracer under "tracer". walls is a list,
-    or a file written by ChamberTracer(walls_file=...), whose base, chamber and seed are then used (unless given)."""
+    or a file written by ChamberTracer(walls_file=...), whose base, chamber and seed are then used (unless given).
+    With certificate, a path: the certificate of the result is saved there (see verify_certificate)."""
     if isinstance(walls, str):
         data = load_walls(walls)
         if data["gram"] != [[int(x) for x in row] for row in L.A.tolist()]:
@@ -373,5 +601,7 @@ def trace_chamber_by_orbits(L: Lattice, walls: Sequence | str, base=None, chambe
         kwargs.setdefault("seed", data["seed"])
     tracer = OrbitTracer(L, walls, base=base, chamber=chamber, threads=threads, **kwargs)
     result = tracer.run(progress=progress)
+    if certificate is not None:
+        _save_certificate(tracer, certificate)
     result["tracer"] = tracer
     return result
