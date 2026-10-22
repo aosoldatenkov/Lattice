@@ -84,6 +84,21 @@ def test_structure():
             assert len(v["walls"]) == L.rank - 1
 
 
+def test_check_detects_missing_edges():
+    """The final check fails if an edge at a vertex is not marked, or if the edges do not pair up."""
+    tracer = ChamberTracer(I_lat(1, 5), base=[1] + [0] * 5)
+    tracer.run()
+    tracer._check()
+    done = tracer._done[0]
+    tracer._done[0] = done & (done - 1)
+    with pytest.raises(RuntimeError):
+        tracer._check()
+    tracer._done[0] = done
+    tracer._parity ^= 1
+    with pytest.raises(RuntimeError):
+        tracer._check()
+
+
 def test_max_vertices():
     with pytest.raises(RuntimeError):
         trace_chamber(I_lat(1, 9), base=[1] + [0] * 9, max_vertices=2)
@@ -109,3 +124,50 @@ def test_parallel(L, base, chamber):
     s, p = serial["tracer"], parallel["tracer"]
     assert set(s.vertices) == set(p.vertices)
     assert {frozenset(e) for e in s.edges.values()} == {frozenset(e) for e in p.edges.values()}
+
+
+def test_cpp_error_falls_back_to_python(monkeypatch):
+    """A failed consistency check in C++ is recorded, and the edge is traced again in Python."""
+    import lattice.vinberg.trace as trace
+    if trace.edge_cpp is None:
+        pytest.skip("no edge_cpp")
+    calls = []
+
+    class Failing:
+        def __getattr__(self, name):
+            return getattr(trace.edge_cpp_module, name)
+
+        def trace_edge(self, *args):
+            calls.append(1)
+            if len(calls) == 3:
+                raise RuntimeError("simulated failure")
+            return trace.edge_cpp_module.trace_edge(*args)
+
+    monkeypatch.setattr(trace, "edge_cpp_module", trace.edge_cpp, raising=False)
+    monkeypatch.setattr(trace, "edge_cpp", Failing())
+    L, base = I_lat(1, 7), [1] + [0] * 7
+    res = trace_chamber(L, base=base)
+    assert res["cpp_errors"] == 1 and res["tracer"].cpp_errors[0]["error"] == "simulated failure"
+    monkeypatch.undo()
+    ref = trace_chamber(L, base=base)
+    assert keys(res["walls"]) == keys(ref["walls"]) and res["edges"] == ref["edges"]
+
+
+def test_failed_task_input_saved(monkeypatch):
+    """The input of a failed task is saved to a JSON file named in the error."""
+    import json
+    import os
+    import re
+    import lattice.vinberg.trace as trace
+
+    def failing(*args, **kwargs):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(trace, "_task_edge", failing)
+    with pytest.raises(RuntimeError, match="simulated failure") as info:
+        trace_chamber(I_lat(1, 4), base=[1, 0, 0, 0, 0])
+    path = re.search(r"saved in (\S+\.json)", str(info.value)).group(1)
+    with open(path) as f:
+        saved = json.load(f)
+    os.remove(path)
+    assert saved["kind"] == "edge" and len(saved["args"][0]) == 5 and saved["gram"][0][0] == 1

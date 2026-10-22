@@ -7,7 +7,7 @@ from lattice._matrix import imat, imat_diag
 from lattice.lattice import Lattice
 from lattice.catalogue import A_lat, E_lat, U_lat, I_lat
 from lattice.vinberg.edges import edge_crossing_roots
-from lattice.vinberg.trace import trace_chamber, trace_ray, _next_walls, finite_vertex_edges
+from lattice.vinberg.trace import trace_chamber, trace_ray, _next_walls, finite_vertex_edges, cusp_edges
 from test_edges import LATTICES
 
 edge_cpp = pytest.importorskip("lattice.edge_cpp")
@@ -76,6 +76,31 @@ def test_edges_of_a_chamber(n):
     assert irrational > 0 or n < 9
 
 
+@pytest.mark.parametrize("L, base", [
+    (I_lat(1, 9), [1] + [0] * 9),
+    (U_lat() + E_lat(8)(-1), None),
+    (Lattice(3, [[0, 1, 0], [1, 0, 0], [0, 0, -4]]), None),
+])
+def test_edge_direction(L, base):
+    """The direction of each edge of the chamber, at finite vertices and at cusps, as in Python."""
+    tracer = trace_chamber(L, base=base)["tracer"]
+    checked = 0
+    for vert in tracer.vertices.values():
+        v = vert["vector"]
+        S = [tracer.walls[i] for i in sorted(vert["walls"])]
+        if vert["ideal"]:
+            items = [(d, u) for d, u in cusp_edges(L, v, S)]
+        else:
+            items = [((j,), u) for j, u in finite_vertex_edges(L, v, S)[1]]
+        for dropped, u in items:
+            W = [[int(x) for x in S[i]] for i in range(len(S)) if i not in dropped]
+            D = [[int(x) for x in S[i]] for i in dropped]
+            got = edge_cpp.edge_direction(L.A.tolist(), [int(x) for x in v], W, D)
+            assert tuple(got) == tuple(int(x) for x in u)
+            checked += 1
+    assert checked == 2 * tracer.result["edges"]
+
+
 def test_overflow_falls_back_to_python():
     """Beyond 64/128 bits, crossing_roots raises OverflowError, and edge_crossing_roots uses Python instead."""
     L = Lattice(3, imat_diag([1, -3, -1]))
@@ -128,3 +153,34 @@ def test_large_coordinates():
             assert found == as_set(edge_crossing_roots(L, a, b, use_cpp=False))
             checked += 1
     assert checked > 0
+
+
+@pytest.mark.parametrize("L, base", [
+    (I_lat(1, 13), [1] + [0] * 13),
+    (U_lat() + E_lat(8)(-1), None),
+    (U_lat(2) + A_lat(2)(-1), [2, 3, 1, 0]),
+    (U_lat(3) + A_lat(2)(-1), None),
+    (U_lat(2) + Lattice(1, [[-1]]) + Lattice(1, [[-2]]), None),
+    (U_lat() + Lattice(1, [[-4]]) + Lattice(1, [[-4]]), None),
+    (Lattice(3, [[0, 1, 0], [1, 0, 0], [0, 0, -4]]), None),
+    (Lattice(3, [[-1, 0, 0], [0, 4, -2], [0, -2, -25]]), None),
+])
+def test_cusp_walls(L, base, monkeypatch):
+    """The walls and the edges at the cusps met while tracing, computed in C++ (edge_cpp.cusp_walls) and in Python."""
+    import lattice.vinberg.trace as trace
+    calls = []
+    original = trace._task_cusp
+
+    def record(L, *args, cpp=True):
+        calls.append(args)
+        return original(L, *args, cpp=cpp)
+
+    monkeypatch.setattr(trace, "_task_cusp", record)
+    trace_chamber(L, base=base)
+    assert calls
+    for z, F, m in calls:
+        walls, comps = edge_cpp.cusp_walls(L.A.tolist(), int(L.exp), list(z), list(m), [list(w) for w in F])
+        ref_walls, ref_drops, _ = original(L, z, F, m, cpp=False)
+        assert {tuple(w) for w in walls} == set(ref_walls)
+        drops = {frozenset(tuple(walls[i]) for i in d) for d in itertools.product(*comps)}
+        assert drops == {frozenset(ref_walls[i] for i in d) for d in ref_drops}

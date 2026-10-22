@@ -9,6 +9,14 @@ from lattice._matrix import IMat, imat, imat2flz, nrows
 from lattice.lattice import Lattice
 
 
+def Coxeter_label(cos2: Fraction):
+    """The label of a pair of walls with cos^2 = (r, s)^2 / ((r, r)(s, s)) (see Coxeter_graph), or None for a value
+    which no pair of roots of a lattice has."""
+    if cos2 > 1:
+        return cos2
+    return {Fraction(0): 2, Fraction(1, 4): 3, Fraction(1, 2): 4, Fraction(3, 4): 6, Fraction(1): 'inf'}.get(cos2)
+
+
 def Coxeter_graph(L, roots, reorder: bool = False):
     """Returns the Coxeter graph of the given roots of L, as a dictionary {(i, j): label} over the pairs
     i < j, where the label of the pair of roots r, s depends on cos^2 = (r, s)^2 / ((r, r)(s, s)): the
@@ -32,20 +40,9 @@ def Coxeter_graph(L, roots, reorder: bool = False):
     edges = {}
     for i in range(nroots):
         for j in range(i + 1, nroots):
-            cos = C[i][j]
-            pair = (min(ord[i], ord[j]), max(ord[i], ord[j]))
-            if cos == 1:
-                edges[pair] = 'inf'
-            elif cos == 0:
-                edges[pair] = 2
-            elif cos == Fraction(1, 4):
-                edges[pair] = 3
-            elif cos == Fraction(2, 4):
-                edges[pair] = 4
-            elif cos == Fraction(3, 4):
-                edges[pair] = 6
-            elif cos > 1:
-                edges[pair] = cos
+            label = Coxeter_label(C[i][j])
+            if label is not None:
+                edges[(min(ord[i], ord[j]), max(ord[i], ord[j]))] = label
     return edges
 
 

@@ -13,8 +13,11 @@ Code references:
 |---|---|
 | Traversal, local walls, start vertex, parallel scheduler | `src/lattice/vinberg/trace.py` (`trace_chamber`, `ChamberTracer`, `trace_ray`) |
 | Roots crossing a segment | `src/lattice/vinberg/edges.py` (`edge_crossing_roots`) |
-| The per-edge core in C++ (§7) | `src/cpp/edge_module.cpp` (module `edge_cpp`: `crossing_roots`, `trace_edge`, `vertex_directions`) |
-| Roots through a cusp | `src/lattice/vinberg/walls.py` (`cusp_root_classes`, `cusp_walls`) |
+| The per-edge core in C++ (§7) | `src/cpp/edge_module.cpp` (module `edge_cpp`: `crossing_roots`, `trace_edge`, `edge_direction`, `vertex_directions`, `cusp_walls`) |
+| Roots through a cusp | `src/lattice/vinberg/walls.py` (`cusp_root_classes`, `cusp_walls`; in C++ `edge_cpp.cusp_walls`) |
+| Coxeter diagram of the walls, symmetries (§9) | `src/lattice/vinberg/coxeter.py` (`WallDiagram`, `ChamberSymmetry`; needs `pynauty`) |
+| Tracing and certification up to symmetry (§9) | `src/lattice/vinberg/orbits.py` (`OrbitTracer`, `trace_chamber_by_orbits`, `GroupAction`) |
+| Pictures of Coxeter diagrams | `src/lattice/draw/diagram.py` (`CoxeterDiagram`, `draw_Coxeter_diagram`) |
 | Conway's river of a binary lattice | `src/lattice/binary.py` (`BinLattice`) |
 | Root system at a point (height 0 of a search), used for the start vertex | `src/lattice/vinberg/certify.py` (`roots_by_height`) |
 | Independent certificate of a list of walls (reference) | `src/lattice/vinberg/certify.py` (`certify_polytope`) |
@@ -155,28 +158,54 @@ reached. A point with a root system of full rank, such as $e_0$ for $I_{1,n}$, i
 
 ## 6. The traversal and parallelism (`ChamberTracer.run`)
 
-The main process keeps the registries (walls, vertices keyed by their primitive vectors, edges keyed by the
-frozensets of their walls) and a queue of edges to trace. The work is done by tasks:
+The main process keeps the registries and a queue of edges to trace; the work is done by tasks:
 
 | Task | Input | Output |
 |---|---|---|
-| edge | start $a$, direction $u$, the reduced basis of $L \cap a^\perp$ (for a finite $a$), the walls of the edge, the known walls | the end, whether it is ideal, the new wall $\alpha$ at a finite end |
-| vertex | a new finite vertex and its walls | the reduced basis of $L \cap v^\perp$ and the directions of its edges (one matrix inverse) |
-| cusp | a new cusp, the walls of the incoming edge, a point $m$ on it | the walls at the cusp and the directions of its edges |
+| edge | a vertex $a$, the walls of the edge, the other walls at $a$, the known walls | the end, whether it is ideal, the new wall $\alpha$ at a finite end |
+| cusp | a new cusp, the walls of the incoming edge, a point $m$ on it | the walls at the cusp and its edges (the dropped walls) |
 
-The complement $L \cap N$ of an edge, needed by the edge search, is the kernel of $y \mapsto (y, u)$ on the
-reduced basis of $L \cap a^\perp$, computed in the edge task. An edge is submitted once, from the first end
-that lists it; a vertex or cusp reached by several edges is computed once.
+The edge task first computes the direction $u$ of the edge at $a$: at a finite vertex, the generator of the
+kernel of $(\cdot, a)$ and of the walls of the edge, at a cusp the other isotropic vector of its plane, oriented
+by the other walls at $a$. The complement $L \cap N$ of the edge, needed by the search, is computed in the task
+as well. A new finite vertex needs no task: its walls are those of the incoming edge and $\alpha$, and its edges
+are obtained by dropping one wall.
+
+**Compact registries.** The chambers of interest have millions of edges ($U \oplus D_{20}$), so nothing is stored
+per edge and little per vertex:
+
+- a vertex is an id, with its primitive vector packed in 64-bit integers when the coordinates fit (else a tuple),
+  its walls as a bit mask (indices in `walls`), and the bit mask of its edges already traced. An edge at a finite
+  vertex is labeled by the index of the wall it does not contain; at a cusp, by its position in the list of the
+  edges of the cusp (one wall dropped from each component of the diagram);
+- the queue is an array of 64-bit integers $(\text{vertex id} \ll 24) \mid j$, $j$ the label of the edge;
+- an edge traced from $v$ to $w$ is marked at both ends; at $w$, the walls of the edge must be those of an edge at
+  $w$. A queue entry whose edge has been marked meanwhile (traced from its other end) is skipped. With several
+  workers, an edge may be traced from both ends at once (a few percent of the edges): this costs time, not
+  correctness.
+
+`vertices` (by vector) and `edges` (by the frozenset of their walls, with their two ends) are built from these
+registries on first access, for tests and small chambers.
 
 With `threads > 1` the tasks run in a `ProcessPoolExecutor` (at most $4 \times$ `threads` tasks in flight);
 with `threads = 1` the same loop runs them in the main process. The order in which the tasks complete does
 not change the result: the known walls given to an edge task only predict its end, which its own search
 certifies.
 
-**Consistency checks.** At the end, every edge listed at a vertex has been traced and ends at that vertex,
-and every edge has two distinct ends whose walls contain the walls of the edge; finite vertices have $n$ walls,
-and the walls at a new vertex contain those of the incoming edge. `max_vertices` stops the traversal of a
-lattice which is not reflective (or whose chamber is too large).
+**Consistency checks.** At the end, every edge at every vertex has been marked (traced from it, or ending at
+it), and the XOR of 64-bit hashes of the wall sets of the edges at all the vertices is 0, i.e. (up to hash
+collisions) every wall set of an edge occurs at an even number of vertices; since an edge traced from $v$ ends at
+another vertex having the same wall set, this number is 2, so the traces from both ends of an edge agree, at no
+memory cost. Finite vertices have $n$ walls, and the walls at a new vertex contain those of the incoming edge;
+the new wall at a finite vertex makes non-obtuse angles with the walls of the edge, and the walls at a cusp form
+an affine diagram (every component is affine, and there are $n - 2 + k$ walls for $k$ components; a missing wall
+would leave an elliptic component, with the same rank).
+
+**Failures.** If a consistency check fails in C++, the edge is traced again in Python alone (exact centers) and
+recorded in `cpp_errors` (also counted in the result). If a task fails anyway, its input (the Gram matrix and the
+arguments of `_task_edge` or `_task_cusp`) is saved to a JSON file named in the error, so that it can be rerun
+alone.
+`max_vertices` stops the traversal of a lattice which is not reflective (or whose chamber is too large).
 
 ## 7. The C++ core (`edge_cpp`)
 
@@ -186,21 +215,34 @@ The work on an edge is done in C++ when possible; the Python implementation rema
 - `crossing_roots(A, exp, a, b, include_end)`: the search of §4. The complement of the plane is the kernel of
   $(\cdot, a)$ on $\mathbb{Z}^{n+1}$, then of $(\cdot, b)$ (unimodular transformations from extended gcds), reduced
   by LLL; $\Lambda$ and the lifts come from a 2-dimensional HNF; the promotion searches use `FPSearch`
-  (`fp_search.hpp`) with the center computed from the Cholesky factor of the complement; the root test is exact.
+  (`fp_search.hpp`) with the center computed from the Cholesky factor of the complement, refined iteratively
+  (the lift is shifted by the nearest lattice vector and the center recomputed from its exact products, so a large
+  lift does not make it inaccurate); the root test is exact.
 - `trace_edge(A, exp, a, u, walls, edge_walls)`: cases 1 and 2 of §3 and the new wall of §5. It returns
   `(0, end, wall)` for a finite end, `(1, cusp, None)` for a rational ideal end, and `(2, None, None)` for an
   irrational one, for which Python walks along the river (its segments are searched by `crossing_roots`). The new
   wall is chosen exactly: $y$ is replaced by $\det(G) \, G^{-1} \mathbf{1}$, $G$ the Gram matrix of the walls of
   the edge, by fraction-free elimination.
-- `vertex_directions(A, v, S)`: the directions of the edges at a finite vertex, each the generator of the kernel
-  of $(\cdot, v)$ and $(\cdot, s_i)$, $i \neq j$.
+- `edge_direction(A, a, W, D)`: the direction of the edge with walls $W$ at the vertex $a$ (finite or a cusp),
+  oriented by the other walls $D$ at $a$ (§6); `vertex_directions(A, v, S)` gives all the directions at a finite
+  vertex at once.
+- `cusp_walls(A, exp, z, m, F)`: the cusp task of §5 and §6, returning the walls at the cusp and the components
+  of their diagram (the edges drop one wall from each). $M = z^\perp / z$ is represented by the complement
+  $C = \{y \in z^\perp : d \cdot y = 0\}$ of $z$, for an integer vector $d$ with $d \cdot z = 1$ (euclidean
+  product); the basis of $z^\perp$ is first LLL-reduced for the form $-(y, y) + (d \cdot y)^2$, positive definite
+  on $z^\perp$, then $C$ for $-(\, ,)$, and the sublattices $M_k$ are reduced after each congruence (the
+  extended gcds alone make the entries overflow). Then the norm-$d$ vectors of $M_k$ (`FPSearch`), the classes and
+  the candidates closest to $m$, the acceptance by increasing distance, and the checks: rank $n - 1$ (certified
+  by the rank modulo $2^{61} - 1$, a lower bound), affine components (exact fraction-free ranks), $n - 2 + k$
+  walls.
 
 Integers are 64-bit, with 128-bit intermediate values; every operation that might overflow is checked
 (`__builtin_*_overflow`) and raises `OverflowError`, and then the Python implementation, with arbitrary precision,
 is used. The only floating-point steps are the LLL reduction of the complement (the row operations are exact and
 unimodular, so only the quality of the reduction depends on the rounding; the integer Gram matrix is updated
 exactly, and the Gram-Schmidt data are recomputed after each swap) and the Fincke-Pohst searches (bounds with a
-margin of 0.5, and the candidates checked exactly). The cusps (§5) are still handled in Python.
+margin of 0.5, and the candidates checked exactly). The start of the traversal (§5, the descent) and the walk
+along the river (§3) remain in Python.
 
 ## 8. Validation and performance
 
@@ -226,10 +268,31 @@ for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after); and the C++ cor
 ## 9. Open points
 
 - **Symmetry.** Large symmetric chambers (the 210 walls of $U \oplus D_{20}$, Borcherds' 17-dimensional example
-  with 960 walls) may have too many edges for a full traversal. A group of isometries of $L$ preserving $C$,
-  known in advance or computed from the final walls, would allow tracing one vertex and edge per orbit.
-- **Cusps in C++.** With the C++ core, the walls at the cusps (`cusp_root_classes`, the acceptance, the edges at
-  a cusp) are the largest remaining part in Python.
+  with 960 walls) may have too many edges for a full traversal; tracing one vertex per orbit of a symmetry group
+  would avoid it. The group is computed (`coxeter.py`; `ChamberTracer(symmetry=True)` reports it with the
+  progress): a permutation $s$ of the walls preserving their Gram matrix (nauty, with the products as edge colors)
+  defines an isometry $g$ of $V$ when the walls span it, and $\mathrm{Sym}(P)$, for the polyhedron $P$ of the
+  known walls, consists of those $g$ with $g(L) = L$ preserving the time orientation: the stabilizer of
+  $(L, +)$ in $\mathrm{Aut}(G)$, from the Schreier generators of its orbit. With all the walls,
+  $O^+(L) = W(L) \rtimes \mathrm{Sym}(C)$. While the walls are incomplete, $g \in \mathrm{Sym}(P)$ is a symmetry
+  of $C$ as soon as it maps a traced vertex $v$ to a traced vertex with the walls $g(\text{walls at } v)$: then $gC$
+  and $C$ share a vertex and its local cone, so $gC = C$.
+
+  **Tracing by orbits** (`orbits.py`). One representative vertex per orbit of the group $G$ of the known walls;
+  all the edges of the representatives are traced. An end $w$ whose walls are $g(\text{walls of } u)$ for a
+  representative $u$ and $g \in G$ is $g(u)$, and $g$ is thereby certified ($gC = C$, as above); otherwise $w$ is a
+  new representative. With $H$ the group generated by the certified elements, $H \cdot \{\text{representatives}\}$
+  is closed under adjacency, hence the whole 1-skeleton: the walls of $C$ are the $H$-orbits of the walls at the
+  representatives, and the numbers of vertices, cusps and edges follow by orbit-stabilizer. Nothing is assumed
+  about $G$ (if the known walls are not all the walls, a new wall appears at some vertex: it is added, $G$ is
+  recomputed, and the traversal restarts). The orbits are identified by enumerating $G$ (`GroupAction`, vectorized;
+  up to a few million elements): the key of a set of walls is the smallest 64-bit hash of its images, ties broken
+  by the images themselves, so the key is exact. A partial run saves its walls with `ChamberTracer(walls_file=...)`,
+  and `trace_chamber_by_orbits(L, path)` certifies from them, in the same chamber (same base, chamber and seed).
+  Tested against full traversals ($I_{1,14}$, $U \oplus A_2^3$, $U \oplus D_4^3$, $U \oplus E_6^2$, Allcock's
+  lattices with diagram symmetries outside $O(L)$).
+- **The edge search.** With the cusps in C++ (3.8 ms per cusp of $U \oplus D_{20}$, against 103 ms in Python),
+  almost all the time goes to `trace_edge` to finite ends (about 9.5 ms per edge of $U \oplus D_{20}$).
 - **Coxeter diagrams.** Vertices and edges could be identified by their sets of walls alone (elliptic and
   parabolic subdiagrams), and the diagram gives free consistency checks (each edge has two ends, the f-vector,
   the Euler characteristic).

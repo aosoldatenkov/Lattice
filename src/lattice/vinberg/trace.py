@@ -41,10 +41,17 @@ relative interior of a face, follow a generic direction inside the face to the f
 face of higher codimension, until a vertex is reached.
 """
 from __future__ import annotations
+import hashlib
+import json
 import math
+import os
 import random
+import struct
+import tempfile
 import time
+from array import array
 from concurrent.futures import ProcessPoolExecutor, Future, wait, FIRST_COMPLETED
+from functools import cached_property
 from fractions import Fraction
 from itertools import product
 from typing import Dict, List, Tuple
@@ -57,6 +64,7 @@ from lattice.binary import BinLattice
 from lattice._matrix import inv2x2
 from lattice.vinberg.edges import edge_crossing_roots, lll_negative_definite, edge_cpp
 from lattice.vinberg.certify import roots_by_height
+from lattice.vinberg.coxeter import WallDiagram
 
 
 def _prim(v) -> IMat:
@@ -358,63 +366,96 @@ def cusp_edges(L: Lattice, z: IMat, S: List[IMat]) -> List[Tuple[Tuple[int, ...]
     edge, oriented into the chamber (the edge is the segment (z, u))."""
     result = []
     comps = _components(L, S)
+    # The walls at a cusp form an affine diagram: every component is affine (its Gram matrix is singular, of
+    # corank 1), and there are n - 2 + k walls for k components; a missing wall would leave an elliptic component
+    # (the rank of S would still be n - 1) and wrong edges
+    G = imat2flz(L.batch_prod(imat(S), imat(S)))
+    for comp in comps:
+        if fl.fmpz_mat([[G[i, j] for j in comp] for i in comp]).rank() != len(comp) - 1:
+            raise RuntimeError(f"The walls at the cusp {_key(z)} do not form an affine diagram")
+    if len(S) - len(comps) != L.rank - 2:
+        raise RuntimeError(f"The walls at the cusp {_key(z)} do not form an affine diagram of rank n - 2")
     for dropped in product(*comps):
         rest = [S[i] for i in range(len(S)) if i not in dropped]
-        plane = L.complement(rest)
-        if nrows(plane) != 2:
-            raise RuntimeError("The plane of an edge at a cusp is not of rank 2")
-        # For b independent of z, (s z + t b)^2 = 0 for (s, t) = (-(b, b), 2 (z, b)); then (u, z) = 2 (z, b)^2 > 0
-        b = next(imat([int(x) for x in b]) for b in plane if _rank([z, b]) == 2)
-        u = _prim(-L.square(b) * z + 2 * L.product(z, b) * b)
-        if not all(L.product(u, S[i]) > 0 for i in dropped):
-            raise RuntimeError("Inconsistent orientation of an edge at a cusp")
-        result.append((tuple(dropped), u))
+        result.append((tuple(dropped), _cusp_direction(L, z, rest, [S[i] for i in dropped])))
     return result
 
 
-def _task_edge(L, max_steps, a, u, C, edge_walls, walls, cpp=True):
-    """Traces an edge from a in the direction u; returns (end, ideal, new wall at a finite end or None).
-    With cpp, the edge is traced in C++ (edge_cpp.trace_edge), except for an irrational ideal end (the walk along
-    the river, whose segments are still searched in C++) or if a value might overflow 64/128 bits."""
+def _cusp_direction(L: Lattice, z: IMat, W: List[IMat], D: List[IMat]) -> IMat:
+    """The other isotropic vector of the plane of the edge with walls W at the cusp z, oriented into the chamber
+    by the dropped walls D."""
+    plane = L.complement(W)
+    if nrows(plane) != 2:
+        raise RuntimeError("The plane of an edge at a cusp is not of rank 2")
+    # For b independent of z, (s z + t b)^2 = 0 for (s, t) = (-(b, b), 2 (z, b)); then (u, z) = 2 (z, b)^2 > 0
+    b = next(imat([int(x) for x in b]) for b in plane if _rank([z, b]) == 2)
+    u = _prim(-L.square(b) * z + 2 * L.product(z, b) * b)
+    if not all(L.product(u, d) > 0 for d in D):
+        raise RuntimeError("Inconsistent orientation of an edge at a cusp")
+    return u
+
+
+def _edge_direction(L: Lattice, a: IMat, W: List[IMat], D: List[IMat]) -> Tuple[IMat, IMat]:
+    """The direction of the edge with walls W at the vertex a (finite or a cusp), oriented into the chamber by the
+    other walls D at a; for a finite a, also an LLL-reduced basis of L cap a^perp (else None)."""
+    if L.square(a) > 0:
+        C, edges = finite_vertex_edges(L, a, list(W) + list(D))
+        return edges[-1][1], C
+    return _cusp_direction(L, a, W, D), None
+
+
+def _task_edge(L, max_steps, a, edge_walls, dropped, walls, cpp=True):
+    """Traces the edge with walls edge_walls at the vertex a (dropped: the other walls at a); returns (end, ideal,
+    new wall at a finite end or None, error). With cpp, the direction and the edge are computed in C++
+    (edge_cpp.edge_direction, edge_cpp.trace_edge), except for an irrational ideal end (the walk along the river,
+    whose segments are still searched in C++) or if a value might overflow 64/128 bits. If a consistency check
+    fails in C++ (the searches there use floating point), the edge is traced again in Python only, and error is
+    the message of C++ (else None)."""
+    u = C = None
     if cpp and edge_cpp is not None:
         try:
-            code, end, alpha = edge_cpp.trace_edge(L.A.tolist(), int(L.exp), list(a), list(u), [list(w) for w in walls],
-                                                   [list(w) for w in edge_walls])
+            A, ew = L.A.tolist(), [list(w) for w in edge_walls]
+            u = edge_cpp.edge_direction(A, list(a), ew, [list(w) for w in dropped])
+            code, end, alpha = edge_cpp.trace_edge(A, int(L.exp), list(a), u, [list(w) for w in walls], ew)
             if code == 0:
-                return tuple(end), False, tuple(alpha)
+                return tuple(end), False, tuple(alpha), None
             if code == 1:
-                return tuple(end), True, None
+                return tuple(end), True, None, None
         except OverflowError:
             pass
-    a, u = imat(list(a)), imat(list(u))
-    complement = _kernel(L, imat([list(r) for r in C]), u) if C is not None else None  # else computed per search
+        except RuntimeError as e:
+            return _task_edge(L, max_steps, a, edge_walls, dropped, walls, cpp=False)[:3] + (str(e),)
+    a = imat(list(a))
+    W = [imat(list(w)) for w in edge_walls]
+    if u is None:
+        u, C = _edge_direction(L, a, W, [imat(list(w)) for w in dropped])
+    else:
+        u = imat(list(u))
+    complement = _kernel(L, C, u) if C is not None else None  # else computed per search
     end, ideal, end_roots = trace_ray(L, a, u, [imat(list(w)) for w in walls], complement, max_steps, use_cpp=cpp)
     if ideal:
-        return _key(end), True, None
-    W = [imat(list(w)) for w in edge_walls]
+        return _key(end), True, None, None
     alpha = _next_walls(L, W, a, end, end_roots)[-1]
-    return _key(end), False, _key(alpha)
+    return _key(end), False, _key(alpha), None
 
 
-def _task_vertex(L, v, S, cpp=True):
-    """The data of the edges at a new finite vertex: (C, [(j, u_j)]); C (a reduced basis of L cap v^perp, used by
-    the Python edge task) is None when the directions are computed in C++ (edge_cpp.vertex_directions)."""
+def _task_cusp(L, z, edge_walls, m, cpp=True):
+    """The walls at a new cusp (reached along an edge with walls edge_walls from the finite point m) and its
+    edges: (walls, [dropped], error), dropped the positions in walls of the walls not containing the edge. With
+    cpp, computed in C++ (edge_cpp.cusp_walls), except if a value might overflow 64/128 bits; if a consistency
+    check fails in C++, the cusp is computed again in Python, and error is the message of C++ (else None)."""
     if cpp and edge_cpp is not None:
         try:
-            dirs = edge_cpp.vertex_directions(L.A.tolist(), list(v), [list(w) for w in S])
-            return None, [(j, tuple(u)) for j, u in enumerate(dirs)]
+            walls, comps = edge_cpp.cusp_walls(L.A.tolist(), int(L.exp), list(z), list(m),
+                                               [list(w) for w in edge_walls])
+            return [tuple(w) for w in walls], list(product(*comps)), None
         except OverflowError:
             pass
-    C, edges = finite_vertex_edges(L, imat(list(v)), [imat(list(w)) for w in S])
-    return [_key(r) for r in C], [(j, _key(u)) for j, u in edges]
-
-
-def _task_cusp(L, z, edge_walls, m):
-    """The walls at a new cusp (reached along an edge with walls edge_walls from the finite point m) and the
-    data of its edges: (walls, [(dropped, u)])."""
+        except RuntimeError as e:
+            return _task_cusp(L, z, edge_walls, m, cpp=False)[:2] + (str(e),)
     z, m = imat(list(z)), imat(list(m))
     S = _cusp_local_walls(L, z, [imat(list(w)) for w in edge_walls], m)
-    return [_key(w) for w in S], [(d, _key(u)) for d, u in cusp_edges(L, z, S)]
+    return [_key(w) for w in S], [d for d, _ in cusp_edges(L, z, S)], None
 
 
 _WORKER = {}
@@ -430,9 +471,7 @@ def _run_task(kind, args):
     L = _WORKER["L"]
     if kind == "edge":
         return _task_edge(L, _WORKER["max_steps"], *args, cpp=_WORKER["cpp"])
-    if kind == "vertex":
-        return _task_vertex(L, *args, cpp=_WORKER["cpp"])
-    return _task_cusp(L, *args)
+    return _task_cusp(L, *args, cpp=_WORKER["cpp"])
 
 
 class _InlineExecutor:
@@ -453,20 +492,58 @@ class _InlineExecutor:
         pass
 
 
+def _bits(mask: int):
+    """The positions of the set bits of mask, increasing."""
+    while mask:
+        low = mask & -mask
+        yield low.bit_length() - 1
+        mask ^= low
+
+
+def _edge_hash(E: int) -> int:
+    """A 64-bit hash of the wall mask of an edge, for the parity check of ChamberTracer._check."""
+    return int.from_bytes(hashlib.blake2b(E.to_bytes((E.bit_length() + 7) // 8, "little"), digest_size=8).digest(),
+                          "little")
+
+
+_SHIFT = 24  # a queue entry is (vertex id << _SHIFT) | j
+
+
 class ChamberTracer:
     """Traces the 1-skeleton of a chamber of the reflection group of L (signature (1, n - 1)); see the module
     docstring. After run(), the attributes are:
         walls: the walls (roots, oriented towards the chamber);
         vertices: {vector key: {"vector", "walls" (frozenset of indices in walls), "ideal" (bool)}};
         edges: {frozenset of wall indices: [the keys of its two ends]}.
+    vertices and edges are built on first access from the compact registries kept during the traversal.
 
     With cpp (the default), the edges are traced by the C++ module edge_cpp when possible (see _task_edge).
-    With threads > 1, the edges, and the new vertices and cusps, are processed by a pool of worker processes:
-    the main process only keeps the registries and the queue. The order in which the edges are traced does not
-    change the result (the known walls only predict the ends, which are certified by the searches)."""
+    With threads > 1, the edges and the new cusps are processed by a pool of worker processes: the main process
+    only keeps the registries and the queue. The order in which the edges are traced does not change the result
+    (the known walls only predict the ends, which are certified by the searches).
+
+    cpp_errors lists the edges (start, walls, dropped walls) and the cusps (cusp, walls of the incoming edge, point
+    on it) on which a consistency check failed in C++, computed again in Python. If a task fails, its input is
+    saved to a JSON file named in the error, to reproduce it.
+
+    diagram is the WallDiagram of the walls found so far (their Gram matrix and Coxeter diagram), with the same
+    indices as walls. With symmetry (needs pynauty), the symmetry group of the known walls (coxeter.py) is reported
+    with the progress whenever the number of walls has changed, and returned in the result under "symmetry"
+    (a ChamberSymmetry; the symmetry group of the chamber, since the walls are then complete).
+
+    With walls_file, the walls found so far are saved there (JSON, with the Gram matrix, base, chamber and seed;
+    see load_walls) at each progress report where their number has changed, and at the end: e.g. to certify the
+    chamber by orbits (vinberg.orbits) from a partial run.
+
+    The registries are compact, for chambers with millions of edges: a vertex is an id, with its vector packed
+    in 64-bit integers when possible, its walls and its traced edges as bit masks; an edge is not stored, but
+    marked at both ends when traced, and the queue holds pairs (vertex id, edge at the vertex) in an array of
+    64-bit integers. An edge at a finite vertex is labeled by the index of the wall it does not contain, an edge
+    at a cusp by its position in the list of the edges of the cusp."""
 
     def __init__(self, L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
-                 max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True):
+                 max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True,
+                 symmetry: bool = False, walls_file: str = None):
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L
@@ -474,13 +551,33 @@ class ChamberTracer:
         self.walls: List[IMat] = []
         self.wall_index: Dict[Tuple[int, ...], int] = {}
         self.wall_keys: List[Tuple[int, ...]] = []  # the walls as tuples, for the tasks
-        self.vertices: Dict[Tuple[int, ...], dict] = {}
-        self.edges: Dict[frozenset, list] = {}
+        # The vertices: their ids by packed vector, and by id the packed vector, the mask of the walls, whether
+        # it is a cusp and the mask of the traced edges (dropped walls at a finite vertex, positions at a cusp)
+        self._ids: Dict[bytes | tuple, int] = {}
+        self._keys: List[bytes | tuple] = []
+        self._walls: List[int] = []
+        self._ideal = bytearray()
+        self._done: List[int] = []
+        self._drops: Dict[int, List[int]] = {}       # cusp id -> the masks of the dropped walls of its edges
+        self._drop_pos: Dict[int, Dict[int, int]] = {}  # cusp id -> {dropped mask: position}
+        self._parity = 0                              # the XOR of the hashes of the edges at all the vertices
+        self._local = 0                               # the number of (vertex, edge at it) pairs
+        self._cusps = 0
+        self._fmt = f"<{self.n}q"
         self.max_vertices = max_vertices
         self.max_steps = max_steps
         self.threads = threads
         self.cpp = cpp
+        self.cpp_errors: List[dict] = []
+        self.diagram = WallDiagram(L)
+        self.symmetry = symmetry
+        if symmetry:
+            from lattice.vinberg import coxeter
+            if coxeter.pynauty is None:
+                raise ImportError("symmetry=True needs pynauty (pip install pynauty, or lattice[symmetry])")
         self.rng = random.Random(seed)
+        self.seed = seed
+        self.walls_file = walls_file
         if base is None:
             from lattice.vinberg.algorithm import Vinberg
             base = Vinberg(L).base
@@ -489,16 +586,100 @@ class ChamberTracer:
             raise ValueError("The base point must have a positive square")
         self.chamber = imat([int(x) for x in chamber]) if chamber is not None else None
 
-    def _add_walls(self, walls) -> frozenset:
-        idx = []
+    def _add_walls(self, walls) -> int:
+        mask = 0
         for w in walls:
             k = _key(w)
             if k not in self.wall_index:
                 self.wall_index[k] = len(self.walls)
                 self.walls.append(imat(list(k)))
                 self.wall_keys.append(k)
-            idx.append(self.wall_index[k])
-        return frozenset(idx)
+                self.diagram.add([k])
+            mask |= 1 << self.wall_index[k]
+        return mask
+
+    def save_walls(self, path: str = None):
+        """Writes the walls found so far to path (default: walls_file), atomically; see load_walls."""
+        path = path or self.walls_file
+        data = {"gram": [[int(x) for x in row] for row in self.L.A.tolist()], "base": [int(x) for x in self.base],
+                "chamber": [int(x) for x in self.chamber] if self.chamber is not None else None, "seed": self.seed,
+                "walls": [list(k) for k in self.wall_keys]}
+        tmp = f"{path}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+
+    def symmetries(self):
+        """The symmetries in O(L) of the polyhedron of the walls found so far (coxeter.WallDiagram.symmetries), or
+        None while they do not span the space."""
+        if self.diagram.rank() < self.n:
+            return None
+        return self.diagram.symmetries(self.base)
+
+    def _report_symmetries(self, start: float):
+        S = self.symmetries()
+        if S is not None:
+            sizes = sorted((len(o) for o in S.wall_orbits), reverse=True)
+            print(f"[{time.perf_counter() - start:.0f} s] symmetries of the {len(self.walls)} walls: order {S.order}, "
+                  f"{len(sizes)} orbits of walls {sizes}", flush=True)
+
+    def _pack(self, v) -> bytes | tuple:
+        try:
+            return struct.pack(self._fmt, *v)
+        except struct.error:
+            return tuple(int(x) for x in v)
+
+    def _vector(self, vid: int) -> Tuple[int, ...]:
+        k = self._keys[vid]
+        return struct.unpack(self._fmt, k) if isinstance(k, bytes) else k
+
+    def _local_edges(self, vid: int):
+        """The edges at a vertex: pairs (j, wall mask of the edge)."""
+        S = self._walls[vid]
+        if self._ideal[vid]:
+            return [(j, S & ~D) for j, D in enumerate(self._drops[vid])]
+        return [(i, S & ~(1 << i)) for i in _bits(S)]
+
+    def _register(self, key, walls, ideal: bool, drops=None, reached=()) -> int:
+        """Registers a new vertex with its walls (for a cusp, with the masks of the dropped walls of its edges);
+        the edges by which it was reached (wall masks) are marked, the others are returned to be queued."""
+        vid = len(self._keys)
+        self._ids[key] = vid
+        self._keys.append(key)
+        self._walls.append(self._add_walls(walls))
+        self._ideal.append(ideal)
+        self._done.append(0)
+        if ideal:
+            self._cusps += 1
+            self._drops[vid] = drops
+            self._drop_pos[vid] = {D: j for j, D in enumerate(drops)}
+        elif self._walls[vid].bit_count() != self.n - 1:
+            raise RuntimeError("A finite vertex does not have n - 1 walls")
+        if self.max_vertices is not None and len(self._keys) > self.max_vertices:
+            raise RuntimeError(f"More than {self.max_vertices} vertices")
+        edges = self._local_edges(vid)
+        self._local += len(edges)
+        for _, E in edges:
+            self._parity ^= _edge_hash(E)
+        for E in reached:
+            self._mark(vid, E)
+        return [vid << _SHIFT | j for j, _ in edges if not self._done[vid] >> j & 1]
+
+    def _mark(self, vid: int, E: int):
+        """Marks the edge with the wall mask E at the vertex as traced; it must be an edge at the vertex."""
+        S = self._walls[vid]
+        if E & ~S:
+            raise RuntimeError("An edge ends at a vertex not containing its walls")
+        if self._ideal[vid]:
+            j = self._drop_pos[vid].get(S & ~E)
+            if j is None:
+                raise RuntimeError("An edge ends at a cusp which does not have it")
+        else:
+            rest = S & ~E
+            if rest.bit_count() != 1:
+                raise RuntimeError("An edge ends at a finite vertex which does not have it")
+            j = rest.bit_length() - 1
+        self._done[vid] |= 1 << j
 
     def _descend(self) -> Tuple[Tuple[int, ...], List[IMat], bool]:
         """Descends from the base point to a vertex of the chamber (see the module docstring); returns the
@@ -552,126 +733,155 @@ class ChamberTracer:
         else:
             executor = _InlineExecutor(gram, self.max_steps, self.cpp)
         pending = {}                 # future -> (kind, data)
-        waiting = set()              # the keys of the new vertices whose data are being computed
-        queue = []                   # the edges to trace: (edge key, vertex key, u, C)
-        submitted = set()            # the keys of the edges traced or being traced
-        self.vertex_edges = {}       # vertex key -> the keys of its edges
+        waiting = {}                 # new cusp key -> the wall masks of the edges reaching it, while its walls
+        queue = array("q")           # the edges to trace, (vertex id << _SHIFT) | j
+        traced = 0
+        reported = 0                 # the number of walls at the last report of the symmetries
         window = 4 * max(self.threads, 1)
 
         def submit(kind, args, data):
-            pending[executor.submit(_run_task, kind, args)] = (kind, data)
+            pending[executor.submit(_run_task, kind, args)] = (kind, data, args)
 
-        def new_vertex(key, walls, ideal, data):
-            """Registers a vertex with known walls; for a finite vertex, the data of its edges are computed
-            by a task, and for a cusp they come with its walls."""
-            self.vertices[key] = {"vector": imat(list(key)), "walls": self._add_walls(walls), "ideal": ideal}
-            if self.max_vertices is not None and len(self.vertices) > self.max_vertices:
-                raise RuntimeError(f"More than {self.max_vertices} vertices")
-            if ideal:
-                add_edges(key, data)
+        def failed(kind, args, error):
+            """Saves the input of a failed task (to reproduce it with _task_edge or _task_cusp) and raises."""
+            fd, path = tempfile.mkstemp(prefix="trace_failure_", suffix=".json")
+            with open(fd, "w") as f:
+                json.dump({"kind": kind, "gram": gram, "exp": int(L.exp), "max_steps": self.max_steps,
+                           "args": args, "error": repr(error)}, f)
+            raise RuntimeError(f"{error} (in a {kind} task; its input is saved in {path})") from error
+
+        def end_reached(vid, E, end, ideal, alpha):
+            """The edge with wall mask E traced from the vertex vid ends at end: marked at both ends, and a new
+            finite vertex is registered (a new cusp is computed by a task)."""
+            self._mark(vid, E)
+            key = self._pack(end)
+            if key in self._ids:
+                w = self._ids[key]
+                if w == vid:
+                    raise RuntimeError("An edge ends at its start")
+                self._mark(w, E)
+            elif key in waiting:
+                waiting[key].append(E)
+            elif ideal:
+                waiting[key] = [E]
+                a = self._vector(vid)
+                m = a if not self._ideal[vid] else tuple(x + y for x, y in zip(a, end))
+                submit("cusp", (tuple(end), [self.wall_keys[i] for i in _bits(E)], m), key)
             else:
-                # The positions j in the result of the vertex task refer to this order of the walls
-                self.order[key] = [self.wall_index[_key(w)] for w in walls]
-                waiting.add(key)
-                submit("vertex", (key, [_key(w) for w in walls]), key)
+                queue.extend(self._register(key, [self.wall_keys[i] for i in _bits(E)] + [alpha], False,
+                                            reached=[E]))
 
-        def add_edges(key, edge_data, C=None):
-            vert = self.vertices[key]
-            S = [self.wall_index[_key(w)] for w in edge_data[0]] if vert["ideal"] else None
-            keys = []
-            if vert["ideal"]:
-                for dropped, u in edge_data[1]:
-                    rest = frozenset(S[i] for i in range(len(S)) if i not in dropped)
-                    keys.append(rest)
-                    queue_edge(rest, key, u, None)
-            else:
-                S = self.order[key]
-                for j, u in edge_data:
-                    rest = frozenset(S[i] for i in range(len(S)) if i != j)
-                    keys.append(rest)
-                    queue_edge(rest, key, u, C)
-            self.vertex_edges[key] = keys
-
-        def queue_edge(ekey, vkey, u, C):
-            if ekey not in submitted:
-                submitted.add(ekey)
-                queue.append((ekey, vkey, u, C))
-
-        def end_reached(ekey, vkey, end, ideal, alpha):
-            self.edges[ekey] = [vkey, end]
-            if end in self.vertices or end in waiting:
-                return
-            a = self.vertices[vkey]["vector"]
-            edge_walls = [self.walls[i] for i in sorted(ekey)]
-            if ideal:
-                waiting.add(end)
-                m = a if L.square(a) > 0 else a + imat(list(end))
-                submit("cusp", (end, [_key(w) for w in edge_walls], _key(m)), end)
-            else:
-                new_vertex(end, edge_walls + [imat(list(alpha))], False, None)
+        def new_cusp(key, walls, drops, reached=()):
+            """Registers a cusp with its walls and its edges (the positions in walls of the dropped walls)."""
+            self._add_walls(walls)
+            S = [self.wall_index[_key(w)] for w in walls]
+            masks = [sum(1 << S[i] for i in d) for d in drops]
+            queue.extend(self._register(key, walls, True, drops=masks, reached=reached))
 
         # The start vertex (in this process)
-        self.order = {}
         v, walls, ideal = self._descend()
         first = _key(v)
         if ideal:
-            self.vertices[first] = {"vector": v, "walls": self._add_walls(walls), "ideal": True}
-            add_edges(first, ([_key(w) for w in walls], [(d, _key(u)) for d, u in cusp_edges(L, v, walls)]))
+            new_cusp(self._pack(first), [_key(w) for w in walls], [d for d, _ in cusp_edges(L, v, walls)])
         else:
-            new_vertex(first, walls, False, None)
+            queue.extend(self._register(self._pack(first), [_key(w) for w in walls], False))
         try:
             while queue or pending:
                 while queue and len(pending) < window:
-                    ekey, vkey, u, C = queue.pop()
-                    args = (vkey, u, C, [self.wall_keys[i] for i in sorted(ekey)], list(self.wall_keys))
-                    submit("edge", args, (ekey, vkey))
+                    entry = queue.pop()
+                    vid, j = entry >> _SHIFT, entry & ((1 << _SHIFT) - 1)
+                    if self._done[vid] >> j & 1:
+                        continue  # traced from its other end
+                    D = self._drops[vid][j] if self._ideal[vid] else 1 << j
+                    E = self._walls[vid] & ~D
+                    args = (self._vector(vid), [self.wall_keys[i] for i in _bits(E)],
+                            [self.wall_keys[i] for i in _bits(D)], list(self.wall_keys))
+                    submit("edge", args, (vid, E))
+                if not pending:
+                    break
                 done, _ = wait(list(pending), return_when=FIRST_COMPLETED)
                 for future in done:
-                    kind, data = pending.pop(future)
-                    result = future.result()
+                    kind, data, args = pending.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        failed(kind, args, e)
                     if kind == "edge":
-                        end, ideal, alpha = result
-                        end_reached(data[0], data[1], end, ideal, alpha)
-                    elif kind == "vertex":
-                        C, edges = result
-                        waiting.discard(data)
-                        add_edges(data, edges, C)
+                        traced += 1
+                        end, ideal, alpha, error = result
+                        if error is not None:
+                            self.cpp_errors.append({"start": args[0], "walls": args[1], "dropped": args[2],
+                                                    "error": error})
+                            if progress:
+                                print(f"C++ failed on an edge ({error}), traced again in Python", flush=True)
+                        end_reached(*data, end, ideal, alpha)
                     else:
-                        walls, edges = result
-                        waiting.discard(data)
-                        self.vertices[data] = {"vector": imat(list(data)), "walls": self._add_walls(walls),
-                                               "ideal": True}
-                        add_edges(data, (walls, edges))
+                        walls, drops, error = result
+                        if error is not None:
+                            self.cpp_errors.append({"cusp": args[0], "walls": args[1], "point": args[2],
+                                                    "error": error})
+                            if progress:
+                                print(f"C++ failed on a cusp ({error}), computed again in Python", flush=True)
+                        new_cusp(data, walls, drops, reached=waiting.pop(data))
                 now = time.perf_counter()
                 if progress and now - last >= progress_interval:
                     last = now
-                    print(f"[{now - start:.0f} s] {len(self.walls)} walls, {self._count(False)} vertices, "
-                          f"{self._count(True)} cusps, {len(self.edges)} edges traced, "
-                          f"{len(queue) + len(pending)} in the queue", flush=True)
+                    print(f"[{now - start:.0f} s] {len(self.walls)} walls, {len(self._keys) - self._cusps} vertices, "
+                          f"{self._cusps} cusps, {traced} edges traced, {len(queue) + len(pending)} in the queue",
+                          flush=True)
+                    if len(self.walls) != reported:
+                        reported = len(self.walls)
+                        if self.walls_file:
+                            self.save_walls()
+                        if self.symmetry:
+                            self._report_symmetries(start)
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
         self._check()
-        self.result = {"walls": self.walls, "vertices": self._count(False), "cusps": self._count(True),
-                       "edges": len(self.edges), "start": first, "seconds": round(time.perf_counter() - start, 3)}
+        if self.walls_file:
+            self.save_walls()
+        self.result = {"walls": self.walls, "vertices": len(self._keys) - self._cusps, "cusps": self._cusps,
+                       "edges": self._local // 2, "traced": traced, "cpp_errors": len(self.cpp_errors), "start": first,
+                       "seconds": round(time.perf_counter() - start, 3)}
         if progress:
             print(f"[{self.result['seconds']:.0f} s] done: {len(self.walls)} walls, {self.result['vertices']} vertices, "
                   f"{self.result['cusps']} cusps, {self.result['edges']} edges", flush=True)
+        if self.symmetry:
+            self.result["symmetry"] = self.symmetries()
+            if progress:
+                self._report_symmetries(start)
         return self.result
 
     def _check(self):
-        """Consistency of the 1-skeleton: every edge listed at a vertex has been traced, its two ends contain
-        its walls, and the vertex is one of its ends."""
-        for vkey, ekeys in self.vertex_edges.items():
-            for ekey in ekeys:
-                ends = self.edges.get(ekey)
-                if ends is None or vkey not in ends:
-                    raise RuntimeError("An edge at a vertex does not end at it")
-        for ekey, ends in self.edges.items():
-            if len(set(ends)) != 2 or not all(ekey <= self.vertices[e]["walls"] for e in ends):
-                raise RuntimeError("An edge does not have two ends containing its walls")
+        """Consistency of the 1-skeleton: every edge at every vertex has been traced from it or ends at it (the
+        ends were checked to contain the walls of the edge when marked), and every wall set of an edge occurs at
+        an even number of vertices (the XOR of their hashes is 0): with the tracing, at exactly two, generically,
+        so that the edges traced from both ends agree."""
+        for vid in range(len(self._keys)):
+            full = (1 << len(self._drops[vid])) - 1 if self._ideal[vid] else self._walls[vid]
+            if self._done[vid] != full:
+                raise RuntimeError("An edge at a vertex has not been traced")
+        if self._parity != 0 or self._local % 2:
+            raise RuntimeError("The edges at the vertices do not pair up")
 
-    def _count(self, ideal: bool) -> int:
-        return sum(1 for v in self.vertices.values() if v["ideal"] == ideal)
+    @cached_property
+    def vertices(self) -> Dict[Tuple[int, ...], dict]:
+        return {self._vector(vid): {"vector": imat(list(self._vector(vid))), "walls": frozenset(_bits(self._walls[vid])),
+                                    "ideal": bool(self._ideal[vid])} for vid in range(len(self._keys))}
+
+    @cached_property
+    def edges(self) -> Dict[frozenset, list]:
+        ends = {}
+        for vid in range(len(self._keys)):
+            for _, E in self._local_edges(vid):
+                ends.setdefault(E, []).append(self._vector(vid))
+        return {frozenset(_bits(E)): e for E, e in ends.items()}
+
+
+def load_walls(path: str) -> dict:
+    """Reads a file written by ChamberTracer.save_walls: {"gram", "base", "chamber", "seed", "walls"}."""
+    with open(path) as f:
+        return json.load(f)
 
 
 def trace_chamber(L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,

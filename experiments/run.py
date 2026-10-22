@@ -8,6 +8,9 @@ import numpy as np
 from lattice import *  # scratch script: the whole public API
 from lattice import fp_search_cpp, vsearch_cpp
 from lattice.vinberg import certify_polytope, trace_chamber
+from lattice.vinberg.orbits import trace_chamber_by_orbits
+from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram
+from lattice.vinberg.trace import load_walls
 
 
 def TestReflections():
@@ -39,17 +42,31 @@ def TestReflections():
 
 L = D_lat(20)(-1) + U_lat()
 print(L.info())
-print(trace_chamber(L, base=[0] * 20 + [1, 1],
-                    progress=True,
-                    threads=24))
+# res = trace_chamber(L, base=[0] * 20 + [1, 1],
+#                     chamber=[22 ** 3 - i ** 3 for i in range(22)],
+#                     symmetry=True,
+#                     progress=True,
+#                     threads=24,
+#                     walls_file="../output/D20U_walls.json")
+
+res = trace_chamber_by_orbits(L, "../output/D20U_walls.json", threads=24, progress=True)
+print(res)
+# walls = load_walls("../output/D20U_walls.json")
+# fname = "../output/D20U"
+# D = draw_Coxeter_diagram(L, walls['walls'], fname + ".html")
+# D.draw(fname + ".pdf", ultraparallel=False)
 
 # rank = 20
 # L = I_lat(1, 0) + I_lat(0, rank - 1)
 # print(L.info())
-# print(trace_chamber(L, base=[1] + [0] * (rank - 1),
+# res = trace_chamber(L, base=[1] + [0] * (rank - 1),
 #                     chamber=[rank ** 2 - i ** 2 for i in range(rank)],
+#                     symmetry=True,
 #                     progress=True,
-#                     threads=8))
+#                     threads=8)
+# fname = "../output/I_{1," + str(rank - 1) + "}"
+# D = draw_Coxeter_diagram(L, res["walls"], fname + ".html")
+#D.draw(fname + ".pdf", ultraparallel=False)
 
 # walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
 # cert = certify_polytope(L, walls, progress=True)

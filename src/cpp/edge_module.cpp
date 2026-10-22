@@ -162,12 +162,11 @@ static Vec to64v(const std::vector<i128>& v) {
 
 // A basis of {y in span_Z(B) : (y, w) = 0}, from the values g_i = (B_i, w): with a unimodular T such that
 // T g = (gcd, 0, ..., 0), the rows 2, ... of T B span the kernel
-static MatI kernel(const Form& F, const MatI& B, const Vec& w) {
-    int m = B.size();
-    std::vector<i128> g(m);
-    std::vector<i128> wa = F.xA(w);
-    for (int i = 0; i < m; ++i) g[i] = F.prod(wa, B[i]);
-    MatI rows = B;
+// Unimodular row operations on B making the values g (of a linear functional on its rows) (gcd, 0, ..., 0);
+// returns the gcd (0 if all the values are 0)
+static i128 reduce_values(MatI& rows, std::vector<i128> g) {
+    int m = rows.size();
+    if (m == 0) return 0;
     for (int i = 1; i < m; ++i) {
         if (g[i] == 0) continue;
         if (g[0] == 0) {
@@ -184,8 +183,32 @@ static MatI kernel(const Form& F, const MatI& B, const Vec& w) {
         g[0] = d;
         g[i] = 0;
     }
-    if (g[0] == 0) return rows;  // w is orthogonal to the whole span
+    return g[0];
+}
+
+static MatI kernel(const Form& F, const MatI& B, const Vec& w) {
+    int m = B.size();
+    std::vector<i128> g(m);
+    std::vector<i128> wa = F.xA(w);
+    for (int i = 0; i < m; ++i) g[i] = F.prod(wa, B[i]);
+    MatI rows = B;
+    if (reduce_values(rows, g) == 0) return rows;  // w is orthogonal to the whole span
     return MatI(rows.begin() + 1, rows.end());
+}
+
+// A basis of {y in span_Z(B) : (y, w) in k Z}: after reduce_values, the rows 2, ... and (k / gcd(g, k)) times
+// the first row
+static MatI kernel_mod(const Form& F, const MatI& B, const Vec& w, i128 k) {
+    int m = B.size();
+    std::vector<i128> g(m);
+    std::vector<i128> wa = F.xA(w);
+    for (int i = 0; i < m; ++i) g[i] = F.prod(wa, B[i]);
+    MatI rows = B;
+    i128 g0 = reduce_values(rows, g);
+    if (g0 == 0) return rows;
+    i128 f = k / gcd128(g0, k);
+    if (f != 1) rows[0] = to64v(comb(f, rows[0], 0, rows[0]));
+    return rows;
 }
 
 // LLL reduction (delta = 0.99) of the rows of B, spanning a negative definite sublattice, for the positive
@@ -361,27 +384,40 @@ struct Segment {
             return;
         }
         // The coordinates of the projection of y to N: GN coords = (y, Nb) with GN = -Q; shift y by the nearest
-        // vector of L cap N, so that the center lies in [-1/2, 1/2]^k
-        std::vector<i128> ya = F.xA(y_in);
-        Eigen::VectorXd v(k);
-        for (int i = 0; i < k; ++i) v(i) = (double)F.prod(ya, Nb[i]);
-        Eigen::VectorXd coords = -llt.solve(v);
-        std::vector<i128> y(y_in.begin(), y_in.end());
+        // vector of L cap N, so that the center lies in [-1/2, 1/2]^k. The products are rounded to double, so for
+        // a large y the center is inaccurate (and roots near the boundary of the search are missed): the shift is
+        // repeated with the exact products of the shifted y, which are small (they only depend on its projection
+        // to N), until the center lies in [-1, 1]^k (iterative refinement; a threshold of 1/2 would oscillate on
+        // ties)
+        Vec y = y_in;
         Eigen::VectorXd center(k);
-        for (int i = 0; i < k; ++i) {
-            double nearest = std::round(coords(i));
-            if (std::fabs(nearest) > 4.0e18) throw std::overflow_error("edge_cpp: the projection is too large");
-            i128 ni = (i128)nearest;
-            if (ni != 0)
-                for (int c2 = 0; c2 < F.n; ++c2) y[c2] = add(y[c2], -mul(ni, Nb[i][c2]));
-            center(i) = coords(i) - nearest;
+        for (int round = 0;; ++round) {
+            std::vector<i128> ya = F.xA(y);
+            Eigen::VectorXd v(k);
+            for (int i = 0; i < k; ++i) v(i) = (double)F.prod(ya, Nb[i]);
+            Eigen::VectorXd coords = -llt.solve(v);
+            std::vector<i128> shifted(y.begin(), y.end());
+            bool moved = false;
+            for (int i = 0; i < k; ++i) {
+                double nearest = (round == 0 || std::fabs(coords(i)) > 1.0) ? std::round(coords(i)) : 0.0;
+                if (std::fabs(nearest) > 4.0e18) throw std::overflow_error("edge_cpp: the projection is too large");
+                i128 ni = (i128)nearest;
+                if (ni != 0) {
+                    moved = true;
+                    for (int c2 = 0; c2 < F.n; ++c2) shifted[c2] = add(shifted[c2], -mul(ni, Nb[i][c2]));
+                }
+                center(i) = coords(i) - nearest;
+            }
+            y = to64v(shifted);
+            if (!moved) break;
+            if (round == 10) throw std::overflow_error("edge_cpp: the center of a search does not converge");
         }
         // -(y_N + z)^2 = (r_Pi, r_Pi) - (r, r) <= 2 exp + (r_Pi, r_Pi), with (r_Pi, r_Pi) = -x2 / D; margin 0.5
         long double ub = (long double)(2 * F.exp) - (long double)x2 / (long double)D + 0.5L;
         if (ub < 0) return;
         FPSearch fps(Q, center, -0.5, (double)ub);
         for (const auto& kv : fps.search_all()) {
-            std::vector<i128> r = y;
+            std::vector<i128> r(y.begin(), y.end());
             for (int i = 0; i < k; ++i) {
                 if (kv[i] == 0) continue;
                 for (int c2 = 0; c2 < F.n; ++c2) r[c2] = add(r[c2], mul(kv[i], Nb[i][c2]));
@@ -537,6 +573,288 @@ static std::vector<Vec> vertex_directions(const Form& F, const Vec& v, const Mat
     return result;
 }
 
+// The direction of the edge with walls W at the vertex a, pointing into the chamber (positive products with the
+// dropped walls): for a finite a, the generator of the kernel of (., a) and (., w), w in W; for a cusp a, the
+// other isotropic vector of the plane W^perp (lattice/vinberg/trace.py, finite_vertex_edges and cusp_edges)
+static Vec edge_direction(const Form& F, const Vec& a, const MatI& W, const MatI& dropped) {
+    MatI E(F.n, Vec(F.n, 0));
+    for (int i = 0; i < F.n; ++i) E[i][i] = 1;
+    Vec u;
+    if (F.prod(a, a) > 0) {
+        MatI K = lll_negative(F, kernel(F, E, a));
+        for (const auto& w : W) K = kernel(F, K, w);
+        if (K.size() != 1) throw std::runtime_error("The walls at a finite vertex are not independent");
+        u = primitive(std::vector<i128>(K[0].begin(), K[0].end()));
+        if (F.prod(u, dropped[0]) < 0) for (auto& x : u) x = -x;
+    } else {
+        MatI K = E;
+        for (const auto& w : W) K = kernel(F, K, w);
+        if (K.size() != 2) throw std::runtime_error("The plane of an edge at a cusp is not of rank 2");
+        // A vector b of the plane independent of a; then u = -(b, b) a + 2 (a, b) b is the other isotropic vector
+        const Vec* b = nullptr;
+        for (const auto& row : K) {
+            bool indep = false;
+            for (int i = 0; i < F.n && !indep; ++i)
+                for (int j = i + 1; j < F.n && !indep; ++j)
+                    if (mul(a[i], row[j]) != mul(a[j], row[i])) indep = true;
+            if (indep) { b = &row; break; }
+        }
+        if (b == nullptr) throw std::runtime_error("The plane of an edge at a cusp does not contain the cusp");
+        u = primitive(comb(-F.prod(*b, *b), a, mul(2, F.prod(a, *b)), *b));
+        for (const auto& d : dropped)
+            if (F.prod(u, d) <= 0) throw std::runtime_error("Inconsistent orientation of an edge at a cusp");
+    }
+    return u;
+}
+
+// --- the walls at a cusp (lattice/vinberg/walls.py, cusp_root_classes and cusp_walls; lattice/vinberg/trace.py,
+// _cusp_local_walls and cusp_edges) ---
+
+// Coefficients s with sum s_i g_i = gcd(g) >= 0
+static std::pair<i128, std::vector<i128>> gcd_coefficients(const std::vector<i128>& g) {
+    std::vector<i128> s(g.size(), 0);
+    i128 d = 0;
+    for (size_t i = 0; i < g.size(); ++i) {
+        if (g[i] == 0) continue;
+        if (d == 0) { d = g[i]; s[i] = 1; continue; }
+        i128 e, x, y;
+        ext_gcd(d, g[i], e, x, y);
+        for (size_t j = 0; j < i; ++j) s[j] = mul(x, s[j]);
+        s[i] = y;
+        d = e;
+    }
+    if (d < 0) { d = -d; for (auto& x : s) x = -x; }
+    return {d, s};
+}
+
+// The rank of an integer matrix, by fraction-free elimination (exact; the entries are minors)
+static int rank_exact(std::vector<std::vector<i128>> M) {
+    int rows = M.size(), r = 0;
+    if (rows == 0) return 0;
+    int cols = M[0].size();
+    i128 prev = 1;
+    for (int c = 0; c < cols && r < rows; ++c) {
+        int piv = r;
+        while (piv < rows && M[piv][c] == 0) ++piv;
+        if (piv == rows) continue;
+        std::swap(M[piv], M[r]);
+        for (int i = r + 1; i < rows; ++i) {
+            for (int j = c + 1; j < cols; ++j)
+                M[i][j] = add(mul(M[r][c], M[i][j]), -mul(M[i][c], M[r][j])) / prev;
+            M[i][c] = 0;
+        }
+        prev = M[r][c];
+        ++r;
+    }
+    return r;
+}
+
+// The rank modulo the prime p = 2^61 - 1: a lower bound for the rank over Q
+static int rank_mod_p(const MatI& S) {
+    const i128 p = ((i128)1 << 61) - 1;
+    auto pw = [&](i128 b, i128 e) { i128 r = 1; b %= p; while (e) { if (e & 1) r = r * b % p; b = b * b % p; e >>= 1; } return r; };
+    int rows = S.size(), r = 0;
+    if (rows == 0) return 0;
+    int cols = S[0].size();
+    std::vector<std::vector<i128>> M(rows, std::vector<i128>(cols));
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < cols; ++j) M[i][j] = ((i128)S[i][j] % p + p) % p;
+    for (int c = 0; c < cols && r < rows; ++c) {
+        int piv = r;
+        while (piv < rows && M[piv][c] == 0) ++piv;
+        if (piv == rows) continue;
+        std::swap(M[piv], M[r]);
+        i128 inv = pw(M[r][c], p - 2);
+        for (int i = r + 1; i < rows; ++i) {
+            if (M[i][c] == 0) continue;
+            i128 f = M[i][c] * inv % p;
+            for (int j = c; j < cols; ++j) M[i][j] = ((M[i][j] - f * M[r][j]) % p + p) % p;
+        }
+        ++r;
+    }
+    return r;
+}
+
+// The candidate walls through the primitive isotropic vector v (oriented with (v, base) > 0): the roots
+// r = w + k v orthogonal to v lie over the vectors u of M = v^perp / v with (u, u) = (r, r) = -d, d | 2 exp, and
+// (u, M) in k Z (k = d / 2 or d), and (r, r) | 2 (r, dual) for a vector dual with (dual, v) = div(v) fixes k
+// modulo a step; in each class, the roots closest to the hyperplane base^perp on both sides
+static std::vector<Vec> cusp_candidates(const Form& F, const Vec& v, const Vec& base) {
+    int n = F.n;
+    std::vector<Vec> out;
+    // dual with (dual, v) = a = div(v), and a functional d (euclidean product) with d . v = 1
+    auto [a, sd] = gcd_coefficients(F.xA(v));
+    Vec dual = to64v(sd);
+    auto [one, dv] = gcd_coefficients(std::vector<i128>(v.begin(), v.end()));
+    if (one != 1) throw std::runtime_error("The cusp vector is not primitive");
+    // A basis of C = {y in v^perp : d . y = 0}, which maps isomorphically to M (v^perp = Z v + C), reduced. The
+    // extended gcds make the entries grow: the basis of v^perp is first reduced for the form -(y, y) + (d . y)^2,
+    // positive definite on v^perp (the form is degenerate there, with kernel Z v, and d . v = 1)
+    MatI E(n, Vec(n, 0));
+    for (int i = 0; i < n; ++i) E[i][i] = 1;
+    MatI K = kernel(F, E, v);
+    {
+        MatI Ad = F.A;
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) Ad[i][j] = to64(add(Ad[i][j], -mul(dv[i], dv[j])));
+        K = lll_negative(make_form(Ad, F.exp), K);
+    }
+    {
+        std::vector<i128> g(K.size());
+        for (size_t i = 0; i < K.size(); ++i) {
+            i128 x = 0;
+            for (int c = 0; c < n; ++c) x = add(x, mul(dv[c], K[i][c]));
+            g[i] = x;
+        }
+        if (iabs(reduce_values(K, g)) != 1) throw std::runtime_error("The cusp vector is not primitive in its complement");
+        K.erase(K.begin());
+    }
+    MatI C = lll_negative(F, K);
+    int m = C.size();
+    if (m == 0) return out;
+    // M in the coordinates of C
+    MatI GM(m, Vec(m));
+    for (int i = 0; i < m; ++i)
+        for (int j = 0; j < m; ++j) GM[i][j] = to64(F.prod(C[i], C[j]));
+    Form FM = make_form(GM, F.exp);
+    MatI Im(m, Vec(m, 0));
+    for (int i = 0; i < m; ++i) Im[i][i] = 1;
+    i128 va = F.prod(v, base);
+    std::vector<i128> basea = F.xA(base);
+    for (i128 d = 1; d <= 2 * F.exp; ++d) {
+        if ((2 * F.exp) % d != 0) continue;
+        i128 k = d % 2 == 0 ? d / 2 : d;
+        MatI Bk = Im;
+        if (k > 1) {
+            for (int j = 0; j < m; ++j) Bk = lll_negative(FM, kernel_mod(FM, Bk, Im[j], k));
+        }
+        Eigen::MatrixXd Q(m, m);
+        for (int i = 0; i < m; ++i)
+            for (int j = 0; j < m; ++j) Q(i, j) = -(double)FM.prod(Bk[i], Bk[j]);
+        FPSearch fps(Q, Eigen::VectorXd::Zero(m), (double)d - 0.5, (double)d + 0.5);
+        for (const auto& kv : fps.search_all()) {
+            std::vector<i128> x(m, 0);
+            for (int i = 0; i < m; ++i) {
+                if (kv[i] == 0) continue;
+                for (int j = 0; j < m; ++j) x[j] = add(x[j], mul(kv[i], Bk[i][j]));
+            }
+            Vec xu = to64v(x);
+            i128 b = -FM.prod(xu, xu);
+            if (b != d) continue;
+            // (r, x) = (u, x) for x in v^perp: (u, u) | 2 (u, M)
+            std::vector<i128> ua = FM.xA(xu);
+            i128 cu = 0;
+            for (auto y : ua) cu = gcd128(cu, y);
+            if (mul(2, cu) % b != 0) continue;
+            i128 content = 0;
+            for (auto y : xu) content = gcd128(content, y);
+            // The lift w = x C, and k with b | 2 ((w, dual) + k a): 2 a k = -2 (w, dual) mod b
+            std::vector<i128> w(n, 0);
+            for (int i = 0; i < m; ++i) {
+                if (xu[i] == 0) continue;
+                for (int c = 0; c < n; ++c) w[c] = add(w[c], mul(xu[i], C[i][c]));
+            }
+            Vec wv = to64v(w);
+            i128 y = mul(2, F.prod(wv, dual));
+            i128 c, s, t;
+            ext_gcd(mul(2, a), b, c, s, t);
+            if (c < 0) { c = -c; s = -s; }
+            if (y % c != 0) continue;
+            wv = to64v(comb(1, wv, -mul(y / c, s), v));
+            Vec step = to64v(comb(b / c, v, 0, v));
+            // r_t = w + t step, (r_t, base) = wb + t sb with sb > 0; t0: the smallest t with a nonnegative value
+            i128 wb = F.prod(basea, wv), sb = mul(b / c, va);
+            i128 t0 = -floordiv(wb, sb);
+            auto root = [&](i128 tt) { return to64v(comb(1, wv, tt, step)); };
+            if (content == 1) {
+                // u is primitive in M, so all the r_t are primitive, hence roots
+                out.push_back(root(t0));
+                if (add(wb, mul(t0, sb)) == 0) out.push_back(root(add(t0, 1)));
+                out.push_back(root(add(t0, -1)));
+                continue;
+            }
+            for (int dir : {1, -1}) {
+                i128 tt = dir == 1 ? t0 : add(t0, -1);
+                for (i128 i = 0; i <= content; ++i) {
+                    Vec r = root(tt);
+                    if (F.is_root(r)) {
+                        out.push_back(r);
+                        if (F.prod(basea, r) != 0) break;
+                    }
+                    tt = add(tt, dir);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// The walls of the chamber at the cusp z, reached along an edge with walls F0 from the point m of the edge
+// (Vinberg's acceptance among the roots through z, closest to m first, with base walls F0), and the components
+// of their Coxeter diagram, which must be affine
+static std::pair<MatI, std::vector<std::vector<int>>> cusp_walls(const Form& F, Vec z, const Vec& m, const MatI& F0) {
+    int n = F.n;
+    z = primitive(std::vector<i128>(z.begin(), z.end()));
+    if (F.prod(z, m) < 0) for (auto& x : z) x = -x;
+    std::vector<Vec> cands = cusp_candidates(F, z, m);
+    std::vector<i128> ma = F.xA(m);
+    struct Cand { size_t i; i128 pm, norm; };
+    std::vector<Cand> keep;
+    for (size_t i = 0; i < cands.size(); ++i) {
+        i128 pm = F.prod(ma, cands[i]);
+        if (pm > 0) keep.push_back({i, pm, -F.prod(cands[i], cands[i])});
+    }
+    // By the distance pm^2 / |(r, r)| from m
+    std::stable_sort(keep.begin(), keep.end(), [](const Cand& x, const Cand& y) {
+        return mul(mul(x.pm, x.pm), y.norm) < mul(mul(y.pm, y.pm), x.norm);
+    });
+    MatI walls = F0;
+    std::vector<std::vector<i128>> WA;
+    for (const auto& w : F0) WA.push_back(F.xA(w));
+    for (const auto& c : keep) {
+        const Vec& r = cands[c.i];
+        bool ok = true;
+        for (size_t j = 0; j < walls.size() && ok; ++j)
+            if (F.prod(WA[j], r) < 0) ok = false;
+        if (!ok) continue;
+        walls.push_back(r);
+        WA.push_back(F.xA(r));
+    }
+    // The rank is at most n - 1 (the walls lie in z^perp): rank n - 1 modulo p certifies it
+    if (rank_mod_p(walls) != n - 1)
+        throw std::runtime_error("The roots through a cusp have rank < n - 1 (or a degenerate reduction modulo p)");
+    // The components of the Coxeter diagram (nonzero products), each affine (Gram matrix of corank 1), and
+    // n - 2 + k walls for k components
+    int k = walls.size();
+    std::vector<std::vector<i128>> G(k, std::vector<i128>(k));
+    for (int i = 0; i < k; ++i)
+        for (int j = 0; j < k; ++j) G[i][j] = F.prod(WA[i], walls[j]);
+    std::vector<int> comp(k, -1);
+    std::vector<std::vector<int>> comps;
+    for (int i = 0; i < k; ++i) {
+        if (comp[i] >= 0) continue;
+        comps.push_back({});
+        std::vector<int> stack = {i};
+        comp[i] = comps.size() - 1;
+        while (!stack.empty()) {
+            int j = stack.back();
+            stack.pop_back();
+            comps.back().push_back(j);
+            for (int l = 0; l < k; ++l)
+                if (comp[l] < 0 && G[j][l] != 0) { comp[l] = comp[i]; stack.push_back(l); }
+        }
+        std::sort(comps.back().begin(), comps.back().end());
+    }
+    for (const auto& c : comps) {
+        std::vector<std::vector<i128>> Gc(c.size(), std::vector<i128>(c.size()));
+        for (size_t i = 0; i < c.size(); ++i)
+            for (size_t j = 0; j < c.size(); ++j) Gc[i][j] = G[c[i]][c[j]];
+        if (rank_exact(Gc) != (int)c.size() - 1) throw std::runtime_error("The walls at a cusp do not form an affine diagram");
+    }
+    if (k - (int)comps.size() != n - 2) throw std::runtime_error("The walls at a cusp do not form an affine diagram of rank n - 2");
+    return {walls, comps};
+}
+
 // --- Python interface ---
 
 static py::list roots_to_list(const std::vector<Root>& roots) {
@@ -563,6 +881,22 @@ PYBIND11_MODULE(edge_cpp, m) {
     }, py::arg("A"), py::arg("v"), py::arg("S"),
        "The directions u_j of the edges at the finite vertex v with walls S: (u_j, v) = 0, (u_j, S[i]) = 0 for "
        "i != j, (u_j, S[j]) > 0. Raises OverflowError beyond 64/128 bits.");
+
+    m.def("edge_direction", [](const MatI& A, const Vec& a, const MatI& W, const MatI& dropped) {
+        Form F = make_form(A, 1);
+        return edge_direction(F, a, W, dropped);
+    }, py::arg("A"), py::arg("a"), py::arg("W"), py::arg("dropped"),
+       "The direction of the edge with walls W at the vertex a (finite or a cusp), oriented by the dropped walls. "
+       "Raises OverflowError beyond 64/128 bits.");
+
+    m.def("cusp_walls", [](const MatI& A, i64 exp, const Vec& z, const Vec& m, const MatI& F0) {
+        Form F = make_form(A, exp);
+        auto [walls, comps] = cusp_walls(F, z, m, F0);
+        return py::make_tuple(walls, comps);
+    }, py::arg("A"), py::arg("exp"), py::arg("z"), py::arg("m"), py::arg("F"),
+       "The walls of the chamber at the cusp z, reached along an edge with walls F from its point m, and the "
+       "components of their (affine) Coxeter diagram, as positions in the list of walls: (walls, components). "
+       "Raises OverflowError beyond 64/128 bits.");
 
     m.def("trace_edge", [](const MatI& A, i64 exp, const Vec& a, const Vec& u, const MatI& walls, const MatI& edge_walls) -> py::tuple {
         Form F = make_form(A, exp);
