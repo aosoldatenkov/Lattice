@@ -9,7 +9,7 @@ from lattice import *  # scratch script: the whole public API
 from lattice import fp_search_cpp, vsearch_cpp
 from lattice.vinberg import certify_polytope, trace_chamber
 from lattice.vinberg.orbits import trace_chamber_by_orbits
-from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram
+from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
 from lattice.vinberg.trace import load_walls
 
 
@@ -56,23 +56,22 @@ def TestReflections():
 # D = draw_Coxeter_diagram(L, walls['walls'], fname + ".html")
 # D.draw(fname + ".pdf", ultraparallel=False)
 
-G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-          [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-          [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-          [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-          [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
-gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
-for v in product(range(2), repeat=5):
-    gens.append([x % 2 for x in (imat(v) @ G).tolist()])
-basis = Lattice.image(imat(gens))
-K = Lattice(16, basis @ basis.transpose() // 2)
-L = K(-1) + U_lat()
-print(L.info())
-print(Genus(L).str())
+# G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+#           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+#           [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+#           [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+#           [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
+# gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
+# for v in product(range(2), repeat=5):
+#     gens.append([x % 2 for x in (imat(v) @ G).tolist()])
+# basis = Lattice.image(imat(gens))
+# K = Lattice(16, basis @ basis.transpose() // 2)
+# L = K(-1) + U_lat()
+# print(L.info())
+# print(Genus(L).str())
 
-res = trace_chamber_by_orbits(L, "../output/Borcherds17_walls.json", threads=24, progress=True)
-print(res)
-
+# res = trace_chamber_by_orbits(L, "../output/Borcherds17_walls.json", threads=24, progress=True)
+# print(res)
 
 # res = trace_chamber(L, base=[0] * 16 + [1, 1],
 #                     symmetry=True,
@@ -80,17 +79,38 @@ print(res)
 #                     threads=24,
 #                     walls_file="../output/Borcherds17_walls.json")
 
-# rank = 20
-# L = I_lat(1, 0) + I_lat(0, rank - 1)
+# d = 3
+# rank = 14
+# L = I_lat(1, 0)(d) + I_lat(0, rank - 1)
 # print(L.info())
 # res = trace_chamber(L, base=[1] + [0] * (rank - 1),
 #                     chamber=[rank ** 2 - i ** 2 for i in range(rank)],
 #                     symmetry=True,
 #                     progress=True,
 #                     threads=8)
-# fname = "../output/I_{1," + str(rank - 1) + "}"
-# D = draw_Coxeter_diagram(L, res["walls"], fname + ".html")
-#D.draw(fname + ".pdf", ultraparallel=False)
+# fname = "../output/Diag_{" + str(d) + ",1x" + str(rank - 1) + "}"
+# trace_chamber_by_orbits(L, res["walls"],
+#                         chamber=[rank ** 2 - i ** 2 for i in range(rank)],
+#                         certificate = fname + ".json",
+#                         threads=24,
+#                         progress=True)
+# D = draw_Coxeter_diagram_3d(L, res["walls"], fname + ".html", method="spectral")
+
+L = E_lat(8)(-1) + E_lat(8)(-1) + A_lat(2)(-1) + U_lat()
+print(L.info())
+fname = "../output/VLat"
+# res = trace_chamber(L, base=[0] * 18 + [1, 1],
+#                     chamber=[101 - i ** 2 for i in range(20)],
+#                     symmetry=True,
+#                     progress=True,
+#                     threads=24,
+#                     walls_file=fname + "_walls.json")
+# trace_chamber_by_orbits(L, fname + "_walls.json",
+#                         certificate = fname + ".json",
+#                         threads=24,
+#                         progress=True)
+walls = load_walls(fname + "_walls.json")
+D = draw_Coxeter_diagram_3d(L, walls["walls"], fname + ".html")
 
 # walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
 # cert = certify_polytope(L, walls, progress=True)

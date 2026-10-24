@@ -1,6 +1,8 @@
 from lattice.draw.circle import Circle, CircleArrangement, PDFPicture
 from lattice.draw.render import Lorentz_ONB, RenderChamber, RenderTiling
 from lattice.draw.diagram import CoxeterDiagram, draw_Coxeter_diagram, diagram_layout
+from lattice.draw.diagram3d import CoxeterDiagram3D, draw_Coxeter_diagram_3d, layout3d
 
 __all__ = ["Circle", "CircleArrangement", "PDFPicture", "Lorentz_ONB", "RenderChamber", "RenderTiling",
-           "CoxeterDiagram", "draw_Coxeter_diagram", "diagram_layout"]
+           "CoxeterDiagram", "draw_Coxeter_diagram", "diagram_layout",
+           "CoxeterDiagram3D", "draw_Coxeter_diagram_3d", "layout3d"]

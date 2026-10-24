@@ -259,15 +259,16 @@ def _classical_scaling(D: np.ndarray, dim: int) -> np.ndarray:
     return vectors[:, idx] * np.sqrt(np.maximum(values[idx], 1e-9))
 
 
-def diagram_layout(k: int, labels: Dict, iterations: int = 300) -> np.ndarray:
-    """Positions of the k nodes of a diagram with the given labels (see the module docstring), scaled so that the
-    median length of the edges which are not ultraparallel is 1."""
-    if k == 0:
-        return np.zeros((0, 2))
-    if k == 1:
-        return np.zeros((1, 2))
+def diagram_layout(k: int, labels: Dict, iterations: int = 300, dim: int = 2, seed: int = 0) -> np.ndarray:
+    """Positions in R^dim of the k nodes of a diagram with the given labels (see the module docstring), scaled so
+    that the median length of the edges which are not ultraparallel is 1. The classical scaling which starts the
+    stress majorization is perturbed slightly (deterministically, from seed): nodes exchanged by a symmetry of the
+    diagram can have the same coordinates in it, and coincident points are a fixed point of the majorization."""
+    if k <= 1:
+        return np.zeros((k, dim))
     D = _distances(k, labels)
-    X = _classical_scaling(D, 2)
+    X = _classical_scaling(D, dim)
+    X = X + 1e-3 * np.random.default_rng(seed).standard_normal(X.shape) * max(float(np.abs(X).max()), 1.0)
     # SMACOF with the weights 1 / D^2 (the usual choice for graph drawing: local distances matter most)
     W = np.zeros_like(D)
     off = ~np.eye(k, dtype=bool)
@@ -281,7 +282,12 @@ def diagram_layout(k: int, labels: Dict, iterations: int = 300) -> np.ndarray:
         np.fill_diagonal(Bm, 0.0)
         np.fill_diagonal(Bm, -Bm.sum(axis=1))
         X = Vp @ (Bm @ X)
-    lengths = [np.hypot(*(X[i] - X[j])) for (i, j), lab in labels.items() if not isinstance(lab, Fraction)]
+    return _normalize(X, labels)
+
+
+def _normalize(X: np.ndarray, labels: Dict) -> np.ndarray:
+    """Centers X and scales it so that the median length of the edges which are not ultraparallel is 1."""
+    lengths = [float(np.linalg.norm(X[i] - X[j])) for (i, j), lab in labels.items() if not isinstance(lab, Fraction)]
     scale = float(np.median(lengths)) if lengths else 1.0
     return (X - X.mean(axis=0)) / (scale if scale > 1e-9 else 1.0)
 

@@ -1,6 +1,8 @@
-"""Vinberg's algorithm with wall refinement (RunTest) on a few higher-rank lattices."""
-from lattice import A_lat, E_lat, U_lat, I_lat, RunTest
+"""Vinberg's algorithm with wall refinement (RunTest) on a few higher-rank lattices.
+Edge tracing with chamber certification for the known families
+of reflective lattices of rank greater than 3"""
 
+from lattice import A_lat, E_lat, U_lat, I_lat, RunTest
 
 def TestDiagLat(rank, d = 1):
     L = I_lat(1, 0)(d) + I_lat(0, rank - 1)
