@@ -188,3 +188,33 @@ def test_orders(order):
 def test_bad_order():
     with pytest.raises(ValueError):
         ChamberTracer(I_lat(1, 4), base=[1, 0, 0, 0, 0], order="lifo")
+
+
+def test_max_walls(tmp_path, capsys):
+    """The tracing stops once max_walls walls are found, with a partial result; the walls are saved."""
+    L, base = U_lat() + A_lat(2)(-1) + A_lat(2)(-1) + A_lat(2)(-1), None
+    full = trace_chamber(L)
+    assert full["complete"] is True and len(full["walls"]) == 10
+    path = str(tmp_path / "walls.json")
+    res = trace_chamber(L, max_walls=8, walls_file=path, progress=True)
+    assert res["complete"] is False and res["edges"] is None
+    assert 8 <= len(res["walls"]) < 10 and res["traced"] < full["traced"]
+    assert keys(res["walls"]) <= keys(full["walls"])
+    from lattice.vinberg.trace import load_walls
+    assert len(load_walls(path)["walls"]) == len(res["walls"])
+    assert "stopped at" in capsys.readouterr().out
+    # A bound at least the number of walls: a complete run
+    res = trace_chamber(L, max_walls=10)
+    assert len(res["walls"]) == 10
+    assert trace_chamber(L, max_walls=11)["complete"] is True
+
+
+def test_max_walls_then_orbits():
+    """Stop at all the walls, then certify by orbits: the same chamber as the full traversal."""
+    pytest.importorskip("pynauty")
+    from lattice.vinberg.orbits import trace_chamber_by_orbits
+    L = U_lat() + A_lat(2)(-1) + A_lat(2)(-1) + A_lat(2)(-1)
+    full = trace_chamber(L)
+    part = trace_chamber(L, max_walls=10)
+    res = trace_chamber_by_orbits(L, part["walls"])
+    assert (res["walls"], res["vertices"], res["cusps"], res["edges"]) == (10, full["vertices"], full["cusps"], full["edges"])

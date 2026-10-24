@@ -535,6 +535,11 @@ class ChamberTracer:
     with the progress whenever the number of walls has changed, and returned in the result under "symmetry"
     (a ChamberSymmetry; the symmetry group of the chamber, since the walls are then complete).
 
+    With max_walls, the traversal stops as soon as that many walls are known (e.g. all the walls, to certify the
+    chamber by orbits, see vinberg.orbits): run() then returns the walls found so far, the vertices and cusps found
+    so far, "edges": None and "complete": False (the consistency checks are skipped; a complete run has
+    "complete": True).
+
     With walls_file, the walls found so far are saved there (JSON, with the Gram matrix, base, chamber and seed;
     see load_walls) at each progress report where their number has changed, and at the end: e.g. to certify the
     chamber by orbits (vinberg.orbits) from a partial run.
@@ -547,7 +552,7 @@ class ChamberTracer:
 
     def __init__(self, L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
                  max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True,
-                 symmetry: bool = False, walls_file: str = None, order: str = "random"):
+                 symmetry: bool = False, walls_file: str = None, order: str = "random", max_walls: int = None):
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
         self.L = L
@@ -569,6 +574,7 @@ class ChamberTracer:
         self._cusps = 0
         self._fmt = f"<{self.n}q"
         self.max_vertices = max_vertices
+        self.max_walls = max_walls
         self.max_steps = max_steps
         self.threads = threads
         self.cpp = cpp
@@ -749,6 +755,7 @@ class ChamberTracer:
         order_rng = random.Random(f"order {self.seed}")
         traced = 0
         reported = 0                 # the number of walls at the last report of the symmetries
+        stopped = False              # stopped by max_walls
         window = 4 * max(self.threads, 1)
 
         def submit(kind, args, data):
@@ -817,6 +824,9 @@ class ChamberTracer:
             queue.extend(self._register(self._pack(first), [_key(w) for w in walls], False))
         try:
             while len(queue) > head or pending:
+                if self.max_walls is not None and len(self.walls) >= self.max_walls:
+                    stopped = True
+                    break
                 while len(queue) > head and len(pending) < window:
                     entry = take()
                     vid, j = entry >> _SHIFT, entry & ((1 << _SHIFT) - 1)
@@ -867,13 +877,19 @@ class ChamberTracer:
                             self._report_symmetries(start)
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
-        self._check()
+        if not stopped:
+            self._check()
         if self.walls_file:
             self.save_walls()
         self.result = {"walls": self.walls, "vertices": len(self._keys) - self._cusps, "cusps": self._cusps,
-                       "edges": self._local // 2, "traced": traced, "cpp_errors": len(self.cpp_errors), "start": first,
+                       "edges": None if stopped else self._local // 2, "traced": traced, "complete": not stopped,
+                       "cpp_errors": len(self.cpp_errors), "start": first,
                        "seconds": round(time.perf_counter() - start, 3)}
-        if progress:
+        if progress and stopped:
+            print(f"[{self.result['seconds']:.0f} s] stopped at {len(self.walls)} walls (max_walls): "
+                  f"{self.result['vertices']} vertices, {self.result['cusps']} cusps, {traced} edges traced so far",
+                  flush=True)
+        elif progress:
             print(f"[{self.result['seconds']:.0f} s] done: {len(self.walls)} walls, {self.result['vertices']} vertices, "
                   f"{self.result['cusps']} cusps, {self.result['edges']} edges", flush=True)
         if self.symmetry:
@@ -915,12 +931,14 @@ def load_walls(path: str) -> dict:
 
 
 def trace_chamber(L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
-                  progress: bool = False, threads: int = 1, **kwargs) -> dict:
+                  progress: bool = False, threads: int = 1, max_walls: int = None, **kwargs) -> dict:
     """Finds the walls of a chamber of the reflection group of L by edge tracing, with its vertices, cusps and
     edges (see the module docstring); the result is certified by construction. base is the starting point
     and chamber a vector choosing the chamber at it (as in Vinberg); threads > 1 traces the edges in parallel
-    worker processes. Returns the summary of ChamberTracer.run(), with the tracer itself under "tracer"."""
-    tracer = ChamberTracer(L, base=base, chamber=chamber, threads=threads, **kwargs)
+    worker processes. With max_walls, the tracing stops once that many walls are found (the result is then not
+    certified: "complete": False; see ChamberTracer). Returns the summary of ChamberTracer.run(), with the tracer
+    itself under "tracer"."""
+    tracer = ChamberTracer(L, base=base, chamber=chamber, threads=threads, max_walls=max_walls, **kwargs)
     result = tracer.run(progress=progress)
     result["tracer"] = tracer
     return result

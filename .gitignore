@@ -22,6 +22,7 @@ Thumbs.db
 .idea/
 
 # --- Auxiliary files ---
+docs/Bibliography/
 output/
 fp_search__.cpp
 old.py

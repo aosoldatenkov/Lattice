@@ -318,7 +318,8 @@ for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after); and the C++ cor
   the polyhedron of the walls, in distinct orbits; every edge of every representative, traced again, ends in the
   orbit of a representative, and every representative and the start vertex are reached so (which certifies their
   walls); the counts by orbit-stabilizer are the stated ones. A verification costs one traversal of the edges of
-  the representatives. A partial run saves its walls with `ChamberTracer(walls_file=...)`,
+  the representatives. A partial run saves its walls with `ChamberTracer(walls_file=...)` (and stops once a given number of
+  walls is known with `max_walls=...`, returning `"complete": False`),
   and `trace_chamber_by_orbits(L, path)` certifies from them, in the same chamber (same base, chamber and seed).
   Tested against full traversals ($I_{1,14}$, $U \oplus A_2^3$, $U \oplus D_4^3$, $U \oplus E_6^2$, Allcock's
   lattices with diagram symmetries outside $O(L)$).

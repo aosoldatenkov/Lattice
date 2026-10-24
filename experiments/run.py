@@ -11,6 +11,7 @@ from lattice.vinberg import certify_polytope, trace_chamber
 from lattice.vinberg.orbits import trace_chamber_by_orbits
 from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
 from lattice.vinberg.trace import load_walls
+from reflective_tests import *
 
 
 def TestReflections():
@@ -40,123 +41,31 @@ def TestReflections():
         count += 1
         print(f"Speed: {count / (time.perf_counter() - start):10.2f} vecs/sec", end='\r')
 
-# L = D_lat(20)(-1) + U_lat()
-# print(L.info())
-# res = trace_chamber(L, base=[0] * 20 + [1, 1],
-#                     chamber=[22 ** 3 - i ** 3 for i in range(22)],
-#                     symmetry=True,
-#                     progress=True,
-#                     threads=24,
-#                     walls_file="../output/D20U_walls_new.json")
+# CertApollonian(10)
+# res = load_walls("../output/Reflective/Apollonian10_walls.json")
+# L = Lattice(len(res['gram']), imat(res['gram']))
+# D = draw_Coxeter_diagram_3d(L, res["walls"], "../output/A.html", method="stress")
 
-# res = trace_chamber_by_orbits(L, "../output/D20U_walls.json", threads=24, progress=True)
-# print(res)
-# walls = load_walls("../output/D20U_walls.json")
-# fname = "../output/D20U"
-# D = draw_Coxeter_diagram(L, walls['walls'], fname + ".html")
-# D.draw(fname + ".pdf", ultraparallel=False)
-
-# G = imat([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-#           [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-#           [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-#           [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-#           [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
-# gens = [[2 * int(i == j) for i in range(16)] for j in range(16)]
-# for v in product(range(2), repeat=5):
-#     gens.append([x % 2 for x in (imat(v) @ G).tolist()])
-# basis = Lattice.image(imat(gens))
-# K = Lattice(16, basis @ basis.transpose() // 2)
-# L = K(-1) + U_lat()
-# print(L.info())
-# print(Genus(L).str())
-
-# res = trace_chamber_by_orbits(L, "../output/Borcherds17_walls.json", threads=24, progress=True)
-# print(res)
-
-# res = trace_chamber(L, base=[0] * 16 + [1, 1],
-#                     symmetry=True,
-#                     progress=True,
-#                     threads=24,
-#                     walls_file="../output/Borcherds17_walls.json")
-
-# d = 3
-# rank = 14
-# L = I_lat(1, 0)(d) + I_lat(0, rank - 1)
-# print(L.info())
-# res = trace_chamber(L, base=[1] + [0] * (rank - 1),
-#                     chamber=[rank ** 2 - i ** 2 for i in range(rank)],
-#                     symmetry=True,
-#                     progress=True,
-#                     threads=8)
-# fname = "../output/Diag_{" + str(d) + ",1x" + str(rank - 1) + "}"
-# trace_chamber_by_orbits(L, res["walls"],
-#                         chamber=[rank ** 2 - i ** 2 for i in range(rank)],
-#                         certificate = fname + ".json",
-#                         threads=24,
-#                         progress=True)
-# D = draw_Coxeter_diagram_3d(L, res["walls"], fname + ".html", method="spectral")
-
-L = E_lat(8)(-1) + E_lat(8)(-1) + A_lat(2)(-1) + U_lat()
+rank = 19
+M = I_lat(1, rank - 1)
+basis = M.even_sublattice()
+L = Lattice(rank, M.batch_prod(basis, basis))
 print(L.info())
-fname = "../output/VLat"
-# res = trace_chamber(L, base=[0] * 18 + [1, 1],
-#                     chamber=[101 - i ** 2 for i in range(20)],
-#                     symmetry=True,
-#                     progress=True,
-#                     threads=24,
-#                     walls_file=fname + "_walls.json")
-# trace_chamber_by_orbits(L, fname + "_walls.json",
-#                         certificate = fname + ".json",
-#                         threads=24,
-#                         progress=True)
-walls = load_walls(fname + "_walls.json")
-D = draw_Coxeter_diagram_3d(L, walls["walls"], fname + ".html")
-
-# walls = RunTest(L, base=[1] + [0] * (rank - 1), chamber=[rank ** 2 - i ** 2 for i in range(rank)], h_batch=1, fps_batch=10000, n_iter=3)
-# cert = certify_polytope(L, walls, progress=True)
-# print("Certified:", cert["certified"])
-# print("Violations:", cert["violations"])
-
-# RunTest(L, base=[1, 1] + [0] * 16, h_batch=1, fps_batch=10000, n_iter=2)
-
-# rank = 22
-# L = D_lat(20)(-1) + U_lat()
-# base = [0] * 20 + [1, 1]
-# V = Vinberg(L, base=base, h_batch=1, fps_batch=10000)
-# V.print_info()
-# walls = V.run(max_iterations=5)
-# for w in walls:
-#     print(w, L.square(w))
-# rays, lines = get_extremal_rays(walls, L.A)
-# print(len(rays), len(lines))
-# squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
-# for i, r in enumerate(rays):
-#     print(r, squares[i])
-# group = Allcock_group(Coxeter_graph(L, walls), len(walls))
-# print(f"The Weyl group: {group}")
-
-# rank = 9
-# L = Lattice(rank, [[1 - 2 * int(i == j) for j in range(rank)] for i in range(rank)])
-# print(L.A)
-# print(L.info())
-# V = Vinberg(L, base=[1] * rank, h_batch=20, fps_batch=10000)
-# V.print_info()
-# walls = V.run(max_iterations=5)
-# for w in walls:
-#     print(w, L.square(w))
-# rays, lines = get_extremal_rays(walls, L.A)
-# print(len(rays), len(lines))
-# squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
-# for i, r in enumerate(rays):
-#     print(r, squares[i])
-
-# V = vsearch_cpp.VSearchCpp(L.A.tolist(), [1] + [0] * (rank - 1), 2.1 * L.exp, 50, False, True)
-# V.init_chamber([0] + [i for i in range(1, rank)])
-# count = 0
-# while True:
-#     count += V.run(100000, 10000)
-#     vecs = V.get_vecs()
-#     print(count, end='\r')
+A = L._lll_indefinite_sp()
+L = Lattice(rank, A)
+print(L.A)
+print(L.info())
+symbol = Genus(L).str()
+fname = "../output/" + symbol
+res = trace_chamber(L,
+                    symmetry=True,
+                    progress=True,
+                    threads=24,
+                    walls_file=fname + "_walls.json")
+trace_chamber_by_orbits(L, fname + "_walls.json",
+                        certificate = fname + ".json",
+                        threads=24,
+                        progress=True)
 
 # L = D_lat(20) + U_lat()
 # print(L(-1).info())
@@ -201,20 +110,3 @@ D = draw_Coxeter_diagram_3d(L, walls["walls"], fname + ".html")
 # FPS = fp_search_cpp.FPSearch(np.array(M.A.tolist(), dtype=float), np.zeros(M.rank, dtype=float), 0, 4.5)
 # vecs = FPS.search_all()
 # print(len(vecs))
-
-# count = 0
-# while True:
-#     count += 1
-#     engine.run(root_batch=10000000, use_reflections=False)
-#     engine.update_walls()
-#     walls = engine.get_walls()
-#     print(f"Iteration {count}; {len(walls)} walls", end='\r')
-#     rays, lines = get_extremal_rays(walls, L.A)
-#     if len(lines) == 0:
-#         squares = [(fl.fmpq_mat(1, L.rank, ray) * L.A * fl.fmpq_mat(L.rank, 1, ray))[0, 0] for ray in rays]
-#         if all(x >= 0 for x in squares):
-#             print("\nThe fundamental domain has finite volume")
-#             print("Walls:")
-#             for w in walls:
-#                 print(w)
-#             break
