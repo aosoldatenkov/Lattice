@@ -51,19 +51,20 @@ def TestReflections():
 # L = Lattice(len(res['gram']), imat(res['gram']))
 # D = draw_Coxeter_diagram_3d(L, res["walls"], "../output/A.html", method="stress")
 
-L = I_lat(1, 0)(23) + A_lat(2)(-1)
+L = Lattice(3, imat_diag([3, -4, -7]))
 res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
 geodesic = res['axis']['lattice']
 v, d = L.dual_vec(L.complement(geodesic)[0])
 basis = concat_rows(geodesic, v)
 M = Lattice(3, L.batch_prod(basis, basis))
+print(M.A)
 tikzcode = RenderTiling(M, [1, 0, 0])
 lines = []
 lines.append("\\documentclass[tikz]{standalone}\n")
 lines.append("\\begin{document}\n")
 lines.extend(tikzcode)
 lines.append("\\end{document}\n")
-fname = "tiling_<23>+A2(-1).tex"
+fname = "tiling_diag(3,-4,-7).tex"
 with open(os.path.join("../output", fname), "w", encoding="utf-8") as file_out:
     file_out.writelines(lines)
 result = subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], cwd="../output",
@@ -72,12 +73,20 @@ result = subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], cwd="../out
 if result.returncode != 0:
     raise RuntimeError(f"PDFLaTeX compilation failed: {result.stderr.decode('utf-8')}")
 
-# for d in range(20, 100):
-#     L = I_lat(1, 0)(d) + A_lat(2)(-1)
-#     res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
-#     if not res['reflective']:
+# count = 0
+# upper = 7
+# lattices = []
+# for diag in product(range(1, upper), range(-upper, 0), range(-upper, 0)):
+#     if math.gcd(*diag) != 1:
+#         continue
+#     L = Lattice(3, imat_diag(diag))
+#     res = quotient_chamber(L, base=[1, 0, 0], threads=24)
+#     if not res['reflective'] and res['structure'] == 'virtually cyclic':
+#         count += 1
+#         print(count, end='\r')
 #         print(L.A)
-#         print(res)
+#         lattices.append(L)
+
 
 # fname = "../output/" + symbol
 # res = trace_chamber(L,

@@ -4,7 +4,7 @@ from collections import Counter
 from itertools import product
 import flint as fl
 import pytest
-from lattice._matrix import imat_diag
+from lattice._matrix import imat_diag, imat2flz
 from lattice.lattice import Lattice
 from lattice.discform import DiscForm
 from lattice.genus import Genus
@@ -65,6 +65,31 @@ def test_large_entries():
     D = DiscForm(L)
     assert D.ord == [d for d in L.dgroup if d > 1]
     assert is_integral(D.A.inv()) and D.A.det() * L.A_fl.det() == 1
+
+
+@pytest.mark.parametrize("A", SAMPLES)
+def test_embedding(A):
+    """The rows of D.dual are the v_i, D.embedding gives the e_j in the v_i, and overlattice(embedding=True) gives
+    the e_j in the basis of the overlattice, which preserves the form."""
+    L = Lattice(len(A), A)
+    D = DiscForm(L)
+    E = fl.fmpq_mat(imat2flz(D.embedding))
+    assert E * D.dual == fl.fmpq_mat(L.rank, L.rank, [int(i == j) for i in range(L.rank) for j in range(L.rank)])
+    assert D.dual * fl.fmpq_mat(L.A_fl) * D.dual.transpose() == D.A
+    for S in D.list_max_isospaces():
+        M, X = D.overlattice(S, embedding=True)
+        assert (imat2flz(X) * M.A_fl * imat2flz(X).transpose()) == L.A_fl
+        assert Lattice.index(X) ** 2 * M.disc == L.disc
+
+
+def test_iter_max_isospaces():
+    """The iterator yields the same subgroups as the list, each once, and the first ones before the search ends."""
+    D = DiscForm(E_lat(8)(2))
+    it = D.iter_max_isospaces()
+    first = next(it)
+    rest = list(it)
+    assert sorted([first] + rest, key=sorted) == D.list_max_isospaces() and len(rest) + 1 == 2295
+    assert list(DiscForm(A_lat(2)).iter_max_isospaces()) == []
 
 
 def test_overlattice_requires_orthogonal_elements():
