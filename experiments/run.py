@@ -3,6 +3,8 @@
 import random as rnd
 import time
 import math
+import os
+import subprocess
 from itertools import product
 import numpy as np
 from lattice import *  # scratch script: the whole public API
@@ -11,9 +13,10 @@ from lattice.vinberg import certify_polytope, trace_chamber
 from lattice.vinberg.orbits import trace_chamber_by_orbits
 from lattice.vinberg.quotient import quotient_chamber
 from lattice.vinberg.nonreflective import search_nonreflective
-from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
+from lattice.draw import RenderTiling, CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
 from lattice.vinberg.trace import load_walls
 from reflective_tests import *
+from lattice._matrix import *
 
 
 def TestReflections():
@@ -48,12 +51,33 @@ def TestReflections():
 # L = Lattice(len(res['gram']), imat(res['gram']))
 # D = draw_Coxeter_diagram_3d(L, res["walls"], "../output/A.html", method="stress")
 
-for d in range(20, 100):
-    L = I_lat(1, 0)(d) + A_lat(2)(-1)
-    res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
-    if not res['reflective']:
-        print(L.A)
-        print(res)
+L = I_lat(1, 0)(23) + A_lat(2)(-1)
+res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
+geodesic = res['axis']['lattice']
+v, d = L.dual_vec(L.complement(geodesic)[0])
+basis = concat_rows(geodesic, v)
+M = Lattice(3, L.batch_prod(basis, basis))
+tikzcode = RenderTiling(M, [1, 0, 0])
+lines = []
+lines.append("\\documentclass[tikz]{standalone}\n")
+lines.append("\\begin{document}\n")
+lines.extend(tikzcode)
+lines.append("\\end{document}\n")
+fname = "tiling_<23>+A2(-1).tex"
+with open(os.path.join("../output", fname), "w", encoding="utf-8") as file_out:
+    file_out.writelines(lines)
+result = subprocess.run(["pdflatex", "\\nonstopmode\\input", fname], cwd="../output",
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.PIPE)
+if result.returncode != 0:
+    raise RuntimeError(f"PDFLaTeX compilation failed: {result.stderr.decode('utf-8')}")
+
+# for d in range(20, 100):
+#     L = I_lat(1, 0)(d) + A_lat(2)(-1)
+#     res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
+#     if not res['reflective']:
+#         print(L.A)
+#         print(res)
 
 # fname = "../output/" + symbol
 # res = trace_chamber(L,

@@ -49,6 +49,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from types import SimpleNamespace
 from typing import Dict, List, Tuple
 import flint as fl
+import numpy as np
 from lattice._matrix import imat
 from lattice.lattice import Lattice
 from lattice.vinberg.trace import (ChamberTracer, cusp_components, _cusp_direction, _key, _run_task, _init_worker,
@@ -793,11 +794,11 @@ def analyze_quotient(L: Lattice, generators, walls, base, max_walls: int = 50000
             zero = [list(w) for w in walls if L.product(c, list(w)) == 0]
             result["rank of the walls through the cusp"] = fl.fmpz_mat(zero).rank() if zero else 0
     else:
-        result.update(_axis(n, generators, _evaluate(n, generators, word)))
+        result.update(_axis(L, generators, _evaluate(n, generators, word), base))
     return result
 
 
-def _axis(n: int, generators, h: fl.fmpz_mat) -> dict:
+def _axis(L: Lattice, generators, h: fl.fmpz_mat, base) -> dict:
     """Whether the generators preserve the axis of the hyperbolic element h (the geodesic between its isotropic
     eigenvectors v+, v- for the eigenvalues lambda, 1/lambda). With f the Salem factor of the characteristic
     polynomial of h (irreducible, simple), the rational hull of the axis is V_f = ker f(h), on which h^(+-1) has a
@@ -805,7 +806,16 @@ def _axis(n: int, generators, h: fl.fmpz_mat) -> dict:
     action; the converse by the Galois conjugates of g v+ = c v+-). If all the generators do, Sym(C) is in the
     stabilizer of the axis, virtually cyclic (an extension of Z or D_infinity, "reverses": some generator swaps the
     ends, by a finite group); otherwise h and g^-1 h g have disjoint pairs of fixed points at infinity (a common one
-    would contradict the discreteness), and Sym(C) contains a free group (ping-pong): non-elementary."""
+    would contradict the discreteness), and Sym(C) contains a free group (ping-pong): non-elementary.
+    In the virtually cyclic case, also "element": h (row action), and "axis": its endpoints, exactly: for a nonzero u
+    in V_f and f = sum a_i x^i of degree d, v(mu) = u f(h) / (h - mu) = sum_j mu^j c_j with the integer vectors
+    c_j = sum_k a_(k + j + 1) u h^k is an eigenvector for every root mu of f; "coefficients": [c_0, ..., c_(d-1)],
+    "signs": [s+, s-] with v+ = s+ v(lambda), v- = s- v(1/lambda) future-directed, and "plus", "minus": v+, v-
+    numerically, scaled to (v+, v-) = 1 (the axis is then {(e^t v+ + e^-t v-) / sqrt(2)}, of norm 1; h moves it by
+    log lambda); "lattice": a basis of the saturated sublattice L cap V_f, of rank d and signature (1, d - 1): the
+    rank-2 lattice of the plane of the axis if lambda is quadratic (d = 2), else its rational hull (the plane of the
+    axis is then defined over Q(lambda + 1/lambda), not over Q)."""
+    n = L.rank
     f = next(p for p, _ in h.charpoly().factor()[1] if p.is_cyclotomic() == 0)
     F = fl.fmpz_mat(n, n)
     for c in reversed(f.coeffs()):                       # Horner: F = f(h)
@@ -822,8 +832,31 @@ def _axis(n: int, generators, h: fl.fmpz_mat) -> dict:
             return {"structure": "non-elementary", "moves the axis": i}
     roots = [r for r, _ in fl.fmpz_poly(f.coeffs()).complex_roots()]
     lam = max(abs(complex(r)) for r in roots)
-    return {"structure": "virtually cyclic", "salem polynomial": [int(c) for c in f.coeffs()], "lambda": lam,
-            "reverses": reverses}
+    a = [int(c) for c in f.coeffs()]
+    d = len(a) - 1
+    sub = Lattice.saturate(K.tolist())
+    try:                                                  # a reduced basis, if the indefinite LLL succeeds
+        _, T = Lattice(d, L.batch_prod(sub, sub)).lll(transform=True)
+        sub = imat(T) @ sub
+    except Exception:
+        pass
+    sub = [[int(x) for x in row] for row in sub]
+    u = fl.fmpz_mat([sub[0]])
+    powers = [u]
+    for _ in range(d - 1):
+        powers.append(powers[-1] * h)
+    coefficients = [[sum(a[k + j + 1] * int(powers[k][0, i]) for k in range(d - j)) for i in range(n)]
+                    for j in range(d)]
+    A = np.array(L.A.tolist(), dtype=float)
+    b = np.array([int(x) for x in base], dtype=float)
+    v = [sum(mu ** j * np.array(c, dtype=float) for j, c in enumerate(coefficients)) for mu in (lam, 1 / lam)]
+    signs = [1 if x @ A @ b > 0 else -1 for x in v]
+    plus, minus = signs[0] * v[0], signs[1] * v[1]
+    scale = math.sqrt(plus @ A @ minus)
+    return {"structure": "virtually cyclic", "salem polynomial": a, "lambda": lam, "reverses": reverses,
+            "element": [[int(h[i, j]) for j in range(n)] for i in range(n)],
+            "axis": {"lattice": sub, "coefficients": coefficients, "signs": signs,
+                     "plus": (plus / scale).tolist(), "minus": (minus / scale).tolist()}}
 
 
 def quotient_chamber(L: Lattice, base=None, chamber=None, threads: int = 1, progress: bool = False,
