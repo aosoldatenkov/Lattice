@@ -9,6 +9,8 @@ from lattice import *  # scratch script: the whole public API
 from lattice import fp_search_cpp, vsearch_cpp
 from lattice.vinberg import certify_polytope, trace_chamber
 from lattice.vinberg.orbits import trace_chamber_by_orbits
+from lattice.vinberg.quotient import quotient_chamber
+from lattice.vinberg.nonreflective import search_nonreflective
 from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
 from lattice.vinberg.trace import load_walls
 from reflective_tests import *
@@ -46,38 +48,23 @@ def TestReflections():
 # L = Lattice(len(res['gram']), imat(res['gram']))
 # D = draw_Coxeter_diagram_3d(L, res["walls"], "../output/A.html", method="stress")
 
-rank = 19
-M = I_lat(1, rank - 1)
-basis = M.even_sublattice()
-L = Lattice(rank, M.batch_prod(basis, basis))
-print(L.info())
-A = L._lll_indefinite_sp()
-L = Lattice(rank, A)
-print(L.A)
-print(L.info())
-symbol = Genus(L).str()
-fname = "../output/" + symbol
-res = trace_chamber(L,
-                    symmetry=True,
-                    progress=True,
-                    threads=24,
-                    walls_file=fname + "_walls.json")
-trace_chamber_by_orbits(L, fname + "_walls.json",
-                        certificate = fname + ".json",
-                        threads=24,
-                        progress=True)
+for d in range(20, 100):
+    L = I_lat(1, 0)(d) + A_lat(2)(-1)
+    res = quotient_chamber(L, base=[1, 0, 0], progress=True, threads=24)
+    if not res['reflective']:
+        print(L.A)
+        print(res)
 
-# L = D_lat(20) + U_lat()
-# print(L(-1).info())
-# D = DiscForm(L(-1))
-# print(D.Ared)
-
-# L = I_lat(1, 21)
-# basis = L.even_sublattice()
-# L = Lattice(22, L.batch_prod(basis, basis))
-# print(L.info())
-# D = DiscForm(L)
-# print(D.Ared)
+# fname = "../output/" + symbol
+# res = trace_chamber(L,
+#                     symmetry=True,
+#                     progress=True,
+#                     threads=24,
+#                     walls_file=fname + "_walls.json")
+# trace_chamber_by_orbits(L, fname + "_walls.json",
+#                         certificate = fname + ".json",
+#                         threads=24,
+#                         progress=True)
 
 # compl = [[[2, 0], [0, 6]], [[4, 2], [2, 4]]]
 # for b in compl:

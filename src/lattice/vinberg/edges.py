@@ -55,6 +55,15 @@ def _ceil_div(x: Fraction | int, y: Fraction | int) -> int:
     return -((-q.numerator) // q.denominator)
 
 
+_INT64 = 2 ** 63
+
+
+def fits_int64(*vectors) -> bool:
+    """Whether all the entries of the vectors fit in 64 bits (the arguments of the C++ module edge_cpp; beyond, the
+    conversion fails, and the Python implementation is used)."""
+    return all(-_INT64 <= int(x) < _INT64 for v in vectors for x in v)
+
+
 def edge_crossing_roots(L: Lattice, a: IMat, b: IMat, include_end: bool = False,
                         complement: IMat = None, use_cpp: bool = True) -> List[Tuple[IMat, Fraction | None]]:
     """All the roots of L whose mirrors cross the open segment between a and b (see the module docstring),
@@ -70,7 +79,7 @@ def edge_crossing_roots(L: Lattice, a: IMat, b: IMat, include_end: bool = False,
     checked 128-bit intermediate values; it computes the complement itself), and falls back to this Python
     implementation if a value might overflow; use_cpp=False uses Python directly (the reference)."""
     a, b = imat([int(x) for x in a]), imat([int(x) for x in b])
-    if use_cpp and edge_cpp is not None:
+    if use_cpp and edge_cpp is not None and fits_int64(a, b):
         try:
             found = edge_cpp.crossing_roots(L.A.tolist(), int(L.exp), [int(x) for x in a], [int(x) for x in b],
                                             include_end)

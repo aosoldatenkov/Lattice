@@ -6,6 +6,7 @@ from itertools import product
 from lattice import *
 from lattice.vinberg import certify_polytope, trace_chamber
 from lattice.vinberg.orbits import trace_chamber_by_orbits
+from lattice.vinberg.quotient import quotient_chamber, verify_quotient
 from lattice.draw import CoxeterDiagram, draw_Coxeter_diagram, draw_Coxeter_diagram_3d
 
 def TestDiagLat(rank, d = 1):
@@ -112,7 +113,7 @@ def CertVinberg():
                         walls_file=fname + "_walls.json",
                         max_walls=36)
     trace_chamber_by_orbits(L, fname + "_walls.json",
-                            certificate = fname + ".json",
+                            certificate = fname + "_cert.json",
                             threads=24,
                             progress=True)
 
@@ -126,10 +127,31 @@ def CertApollonian(rank):
                         threads=24,
                         walls_file=fname + "_walls.json")
     trace_chamber_by_orbits(L, fname + "_walls.json",
-                            certificate = fname + ".json",
+                            certificate = fname + "_cert.json",
                             threads=24,
                             progress=True)
-    
+
+def CertAllApollonian():
+    for r in range(3, 9):
+        CertApollonian(r)
+
+def CertGLMWY(rank):
+    L = Lattice(rank, [[1 - (rank - 2) * int(i == j) for j in range(rank)] for i in range(rank)])
+    print(L.info())
+    fname = "../output/Reflective/GLMWY" + str(rank)
+    res = trace_chamber(L, base=[1] * rank,
+                        symmetry=True,
+                        progress=True,
+                        threads=24,
+                        walls_file=fname + "_walls.json")
+    trace_chamber_by_orbits(L, fname + "_walls.json",
+                            certificate = fname + "_cert.json",
+                            threads=24,
+                            progress=True)
+
+def CertAllGLMWY():
+    for r in range(3, 9):
+        CertGLMWY(r)
 
 def CertLattice(L, fname, expected=None, threads=24, **kwargs):
     """Traces the chamber of L (saving the walls), certifies it by orbits (saving the certificate), and compares the
@@ -166,3 +188,35 @@ def CertBogachevPerepechko(threads=24):
     print("\nlattice              paper  certified")
     for name, n, w in summary:
         print(f"{name:20s} {'-' if n is None else n:>5}  {w:>9}" + ("" if n is None or n == w else "   <- differs"))
+
+def CertQuotient(L, fname, expected=None, threads=24, **kwargs):
+    """Traces the chamber of L modulo its symmetries (saving the certificate), verifies the certificate, and compares
+    the result with the expected values (a dict of keys of the result); returns the result of the traversal."""
+    print(L.info())
+    res = quotient_chamber(L, progress=True, threads=threads, certificate=fname + "_quotient.json", **kwargs)
+    v = verify_quotient(fname + "_quotient.json", threads=threads)
+    print(f"certificate verified: {v['verified']}, structure {v['structure']}")
+    if expected is not None:
+        for key, value in expected.items():
+            print(f"{key}: {res.get(key)}, expected {value}: " + ("agrees" if res.get(key) == value else "DISAGREES"))
+    return res
+
+def CertConway(threads=24):
+    """II_{1,25} = U + E_8(-1)^3 (Conway, The automorphism group of the 26-dimensional even unimodular Lorentzian
+    lattice, J. Algebra 80, 1983): the walls of C are the Leech roots, of height 1 with respect to the Weyl vector rho
+    of norm 0, and Sym(C) is the group Lambda.Co_0 of the affine automorphisms of the Leech lattice, fixing rho
+    (parabolic). The vertices of C correspond to the holes of the Leech lattice: the 23 cusps to the deep holes (the
+    23 Niemeier lattices with roots, their affine diagrams), the 284 finite vertices to the shallow holes (Borcherds,
+    Conway, Queen, Sloane; SPLAG chapter 25). The cusp A_1~^24 (2^24 edges) has 5 orbits of edges under its
+    stabilizer 2^12.M_24 (the Golay cosets of weights 0, ..., 4 under M_24)."""
+    L = U_lat() + E_lat(8)(-1) * 3
+    expected = {"structure": "parabolic", "representatives": 307, "cusps": 23, "heights": [(2, 1)],
+                "rank of the walls through the cusp": 0}
+    res = CertQuotient(L, "../output/Reflective/II_1_25", expected, threads=threads, base=[1, 1] + [0] * 24)
+    rho = [int(x) for x in res["Weyl vector"]]
+    print(f"Weyl vector {rho}, norm {L.square(rho)}")
+    cusp = next(r["local"] for r in res["tracer"].representatives
+                if r["ideal"] and sorted(len(c) for c in r["local"].comps) == [2] * 24)
+    print(f"orbits of edges at the cusp A_1~^24: {len(cusp.edges)}, expected 5: " +
+          ("agrees" if len(cusp.edges) == 5 else "DISAGREES"))
+    return res

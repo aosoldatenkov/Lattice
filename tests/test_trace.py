@@ -218,3 +218,60 @@ def test_max_walls_then_orbits():
     part = trace_chamber(L, max_walls=10)
     res = trace_chamber_by_orbits(L, part["walls"])
     assert (res["walls"], res["vertices"], res["cusps"], res["edges"]) == (10, full["vertices"], full["cusps"], full["edges"])
+
+
+def _irrational_edges(L, tracer):
+    """The edges (v, u, end) of a traced chamber from a finite vertex whose line has irrational ideal ends."""
+    import math
+    from lattice.vinberg.trace import finite_vertex_edges
+    ends = {}
+    for E, (e1, e2) in tracer.edges.items():
+        ends.setdefault(e1, {})[E] = e2
+        ends.setdefault(e2, {})[E] = e1
+    for vk, vert in tracer.vertices.items():
+        if vert["ideal"]:
+            continue
+        S = sorted(vert["walls"])
+        for j, u in finite_vertex_edges(L, vert["vector"], [tracer.walls[i] for i in S])[1]:
+            p, c, q = L.square(vert["vector"]), L.product(vert["vector"], u), L.square(u)
+            if math.isqrt(c * c - p * q) ** 2 != c * c - p * q:
+                yield vert["vector"], u, ends[vk][frozenset(S[i] for i in range(len(S)) if i != j)]
+
+
+@pytest.mark.parametrize("L, base", [
+    (I_lat(1, 9), [1] + [0] * 9),
+    (Lattice(3, [[2, 1, 60], [1, -2, 0], [60, 0, -120]]), None),  # Allcock 104.11, a compact polygon
+])
+def test_river_period(L, base):
+    """The translation g of the line of an edge (a power of the fundamental automorphism of its binary lattice)
+    extends to L by the identity on the orthogonal complement, and the edge ends at g(a) at the latest."""
+    import flint as fl
+    import numpy as np
+    from lattice.vinberg.trace import _river
+    tracer = trace_chamber(L, base=base)["tracer"]
+    A = fl.fmpq_mat(fl.fmpz_mat(L.A.tolist()))
+    checked = 0
+    for v, u, w in _irrational_edges(L, tracer):
+        R = _river(L, v, u)
+        assert R["position"](imat(list(w))) <= R["period_end"]
+        basis = [[int(x) for x in r] for r in R["basis"]]
+        N = [[int(x) for x in r] for r in L.complement(basis)]
+        image = (np.array(R["g"], dtype=object) @ np.array(basis, dtype=object)).tolist()
+        M = fl.fmpq_mat(basis + N).inv() * fl.fmpq_mat([[int(x) for x in r] for r in image] + N)
+        assert all(x.q == 1 for x in M.entries()) and M * A * M.transpose() == A
+        checked += 1
+    assert checked > 0
+
+
+def test_infinite_geodesic(monkeypatch):
+    """Without any mirror crossing the line, the walk along the river stops after one period of its stabilizer
+    with InfiniteGeodesic (instead of a fixed number of steps)."""
+    import lattice.vinberg.trace as trace
+    L = I_lat(1, 9)
+    tracer = trace_chamber(L, base=[1] + [0] * 9)["tracer"]
+    v, u, _ = next(_irrational_edges(L, tracer))
+    monkeypatch.setattr(trace, "edge_crossing_roots", lambda *args, **kwargs: [])
+    with pytest.raises(trace.InfiniteGeodesic) as info:
+        trace.trace_ray(L, v, u, [], use_cpp=False)
+    e = info.value
+    assert e.k >= 1 and len(e.g) == 2 and "infinite volume" in str(e)

@@ -34,7 +34,8 @@ Following an edge (_trace_ray) from a point a in the direction u, i.e. along x(t
     (one period of the river shifted by its automorphism), and the segments between them are checked one
     after the other (overlapping, so that no point is missed) until a crossing is found; for a chamber of
     finite volume this terminates. The bank vectors have small norms and consecutive ones are close, so
-    every segment costs about the same (_river_points).
+    every segment costs about the same (_river). The walk is bounded: one period of a translation of the line which
+    extends to an automorphism of L decides it (see trace_ray).
 
 The starting vertex is found by descending from a base point p (with a chamber at p): from a point q in the
 relative interior of a face, follow a generic direction inside the face to the first mirror, which lies on a
@@ -62,9 +63,24 @@ from lattice.lattice import Lattice
 from lattice.vinberg.walls import cusp_walls
 from lattice.binary import BinLattice
 from lattice._matrix import inv2x2
-from lattice.vinberg.edges import edge_crossing_roots, lll_negative_definite, edge_cpp
+from lattice.vinberg.edges import edge_crossing_roots, lll_negative_definite, edge_cpp, fits_int64
 from lattice.vinberg.certify import roots_by_height
 from lattice.vinberg.coxeter import WallDiagram
+
+
+class InfiniteGeodesic(RuntimeError):
+    """No mirror crosses the geodesic of a rational anisotropic plane through a point a of the closed chamber: the
+    chamber contains a whole geodesic with irrational ends, so it has infinite volume and the lattice is not
+    reflective. Raised by trace_ray when the walk along the river covers a whole period of the stabilizer of the
+    plane (see _river) without a crossing. Attributes: a, u (the point and direction), basis (of the binary lattice
+    M = Pi cap L), g (the 2 x 2 matrix of the translation, acting on rows of coordinates in basis; g + identity on
+    Pi^perp is in O(L)), k (the power of the fundamental automorphism of M)."""
+
+    def __init__(self, a, u, basis, g, k):
+        self.a, self.u, self.basis, self.g, self.k = a, u, basis, g, k
+        super().__init__(f"No mirror crosses the geodesic through {_key(a)} in the direction {_key(u)}: the chamber "
+                         f"has infinite volume, and the lattice is not reflective (one period of the stabilizer of "
+                         f"the plane, the {k}-th power of its fundamental automorphism, was checked)")
 
 
 def _prim(v) -> IMat:
@@ -218,12 +234,19 @@ def _crossing(L: Lattice, a: IMat, b: IMat, found) -> Tuple[IMat, bool, List[IMa
 
 
 def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat = None,
-              max_steps: int = 200, use_cpp: bool = True) -> Tuple[IMat, bool, List[IMat]]:
+              max_steps: int = None, use_cpp: bool = True) -> Tuple[IMat, bool, List[IMat]]:
     """Follows x(t) = a + t u, t > 0, from the point a (finite or ideal, in the closure of the chamber) to the
     first mirror, or to the ideal end of the line; walls are known walls, used to predict the end (the result
     does not depend on them). Returns (end, ideal, end_roots), where end_roots are all the roots through a
     finite end with (r, a) > 0 (None for an ideal end). complement is an optional LLL-reduced basis of the
-    orthogonal complement of the line in L."""
+    orthogonal complement of the line in L.
+
+    For an irrational ideal end, the walk along the river is bounded: the stabilizer of the plane contains a
+    translation g of the line with g + identity on Pi^perp in O(L) (see _river), so the set of mirrors crossing the
+    line is invariant under g, and checking the segment (a, g(a)] decides the whole line. If no mirror crosses it,
+    InfiniteGeodesic is raised (the chamber has infinite volume). From a vertex of the chamber this cannot happen:
+    the mirror of a wall at a not containing the line crosses it at a, so its image crosses it at g(a), and the
+    edge ends at g(a) at the latest. max_steps optionally bounds the number of bank vectors further."""
     p, c, q = L.square(a), L.product(a, u), L.square(u)
     # The candidate end from the known walls not through a: (w, a) + t (w, u) = 0 with t > 0
     best = None
@@ -266,24 +289,59 @@ def trace_ray(L: Lattice, a: IMat, u: IMat, walls: List[IMat], complement: IMat 
     # vectors on its bank ahead of a, and check overlapping segments between them
     if p <= 0:
         raise RuntimeError("Irrational ideal end from an ideal point")
+    river = _river(L, a, u)
+    position = river["position"]
     points = [a]
-    for b in _river_points(L, a, u):
+    for b in river["points"]:
         points.append(b)
         if len(points) >= 3:
-            # (points[-3], b) contains points[-2] in its interior; the previous segment ended at points[-2]
+            # (points[-3], b) contains points[-2] in its interior; the previous segment ended at points[-2], so the
+            # segments checked so far cover the open interval (a, b)
             start = points[-3]
             found = edge_crossing_roots(L, start, b, complement=complement, use_cpp=use_cpp)
             if found:
                 return _crossing(L, start, b, found)
-        if len(points) > max_steps:
+            if position(b) > river["period_end"]:
+                raise InfiniteGeodesic(a, u, river["basis"], river["g"], river["k"])
+        if max_steps is not None and len(points) > max_steps:
             break
     raise RuntimeError(f"No mirror found along the ray from {_key(a)} after {max_steps} steps")
 
 
-def _river_points(L: Lattice, a: IMat, u: IMat):
-    """The positive vectors on the bank of Conway's river of the plane Pi = <a, u> (anisotropic, of signature
-    (1, 1), with u orthogonal to a), in the order of their positions t along a + t u, from the first one with
-    t > 0 towards the ideal end (t -> t_inf), oriented with (x, a) > 0.
+def _plane_period(L: Lattice, basis: IMat, eps: np.ndarray, max_k: int = 10 ** 6) -> int:
+    """The smallest k >= 1 such that eps^k + identity on Pi^perp preserves L, for an automorphism eps of the binary
+    lattice M with the given basis (acting on rows of coordinates): eps^k must act trivially on the projection of L
+    to Pi modulo M, i.e. on the glue group L / (M + M^perp), whose order is the index of M + M^perp in L. The
+    projection of e_i has the coordinates c_i = (e_i A P^T) G^-1 (P the basis, G = P A P^T), and the condition is
+    c_i eps^k = c_i modulo Z^2."""
+    P = np.array([[int(x) for x in r] for r in basis], dtype=object)
+    A = np.array(L.A.tolist(), dtype=object)
+    G = P @ A @ P.T
+    g00, g01, g11 = int(G[0, 0]), int(G[0, 1]), int(G[1, 1])
+    det = g00 * g11 - g01 * g01
+    # det G^-1 = [[g11, -g01], [-g01, g00]], so det * c_i is integral; work modulo D = |det|
+    C = (A @ P.T) @ np.array([[g11, -g01], [-g01, g00]], dtype=object)
+    D = abs(det)
+    C = C % D
+    E = np.array([[1, 0], [0, 1]], dtype=object)
+    e = np.array([[int(x) for x in r] for r in eps], dtype=object)
+    for k in range(1, max_k + 1):
+        E = (E @ e) % D
+        if not ((C @ (E - np.eye(2, dtype=int).astype(object))) % D).any():
+            return k
+    raise RuntimeError(f"The period of the plane exceeds {max_k}")
+
+
+def _river(L: Lattice, a: IMat, u: IMat) -> dict:
+    """The walk along Conway's river of the plane Pi = <a, u> (anisotropic, of signature (1, 1), with u orthogonal
+    to a), and the bound for it. Returns a dictionary with:
+        points: the positive vectors on the bank of the river, in the order of their positions t along a + t u,
+            from the first one with t > 0 towards the ideal end (t -> t_inf), oriented with (x, a) > 0;
+        position: the function x -> t;
+        g, k, basis: the translation g = eps^k of the binary lattice M = Pi cap L (with this basis), eps its
+            fundamental automorphism in the direction of the walk, and k the smallest power such that g + identity
+            on Pi^perp is in O(L) (see _plane_period);
+        period_end: the position of g(a).
 
     The bank vectors of one period of the river (BinLattice.river), shifted by the powers of its automorphism
     S, are all the bank vectors; their positions are monotonic along the river. Consecutive ones are close
@@ -321,20 +379,54 @@ def _river_points(L: Lattice, a: IMat, u: IMat):
     t1 = [position(x) for x in shifted(1)]
     step = 1 if t1[0] > t0[0] else -1
     order = (lambda xs: xs) if step == 1 else (lambda xs: xs[::-1])
-    # Go back to a period starting at a position <= 0, then walk forward from the first point with t > 0
-    k = 0
-    while position(order(shifted(k))[0]) > 0:
-        k -= step
-    # The last bank vector of a period can be the first one of the next period: skip repetitions, which would
-    # break the overlapping of the segments in trace_ray
-    last = position(a)
-    while True:
-        for x in order(shifted(k)):
-            t = position(x)
-            if t > last:
-                last = t
-                yield _prim(x)
-        k += step
+
+    # The translation in the direction of the walk: eps = S^step, made proper and preserving the future cone (the
+    # sign does not change the positions); its power g = eps^k extends to L by the identity on Pi^perp
+    eps = np.array([[int(x) for x in r] for r in (S if step == 1 else imat(S_inv))], dtype=object)
+    if eps[0, 0] * eps[1, 1] - eps[0, 1] * eps[1, 0] != 1:
+        eps = eps @ eps
+    Bm = np.array([[int(x) for x in r] for r in basis], dtype=object)
+    Am = np.array(L.A.tolist(), dtype=object)
+    # The coordinates of a (a vector of M) in the basis: P P^T c = P a
+    Pq = fl.fmpq_mat([[int(x) for x in r] for r in basis])
+    sol = (Pq * Pq.transpose()).solve(Pq * fl.fmpq_mat([[int(x)] for x in a]))
+    if any(x.q != 1 for x in sol.entries()):
+        raise RuntimeError("The start of a ray is not a vector of the binary lattice of its plane")
+    a_coords = np.array([int(x) for x in sol.entries()], dtype=object)
+    if (a_coords @ eps @ Bm) @ Am @ np.array([int(x) for x in a], dtype=object) < 0:
+        eps = -eps
+    k = _plane_period(L, basis, eps)
+    g = _power(eps, k)
+    ga = imat([int(x) for x in a_coords @ g @ Bm])
+
+    def points():
+        # Go back to a period starting at a position <= 0, then walk forward from the first point with t > 0
+        j = 0
+        while position(order(shifted(j))[0]) > 0:
+            j -= step
+        # The last bank vector of a period can be the first one of the next period: skip repetitions, which would
+        # break the overlapping of the segments in trace_ray
+        last = position(a)
+        while True:
+            for x in order(shifted(j)):
+                t = position(x)
+                if t > last:
+                    last = t
+                    yield _prim(x)
+            j += step
+
+    return {"points": points(), "position": position, "g": g, "k": k, "basis": basis, "period_end": position(ga)}
+
+
+def _power(M: np.ndarray, k: int) -> np.ndarray:
+    """M^k for an object array, by squaring."""
+    R = np.array([[1, 0], [0, 1]], dtype=object)
+    while k:
+        if k & 1:
+            R = R @ M
+        M = M @ M
+        k >>= 1
+    return R
 
 
 def _kernel(L: Lattice, C: IMat, u: IMat) -> IMat:
@@ -365,20 +457,26 @@ def cusp_edges(L: Lattice, z: IMat, S: List[IMat]) -> List[Tuple[Tuple[int, ...]
     from each component of the Coxeter diagram of S, and u is the other isotropic vector of the plane of the
     edge, oriented into the chamber (the edge is the segment (z, u))."""
     result = []
+    comps = cusp_components(L, z, S)
+    for dropped in product(*comps):
+        rest = [S[i] for i in range(len(S)) if i not in dropped]
+        result.append((tuple(dropped), _cusp_direction(L, z, rest, [S[i] for i in dropped])))
+    return result
+
+
+def cusp_components(L: Lattice, z: IMat, S: List[IMat]) -> List[List[int]]:
+    """The components of the Coxeter diagram of the walls S at the cusp z (lists of positions in S), checked to form
+    an affine diagram of rank n - 2: every component is affine (its Gram matrix is singular, of corank 1), and there
+    are n - 2 + k walls for k components; a missing wall would leave an elliptic component (the rank of S would still
+    be n - 1) and wrong edges. The edges at z drop one wall from each component."""
     comps = _components(L, S)
-    # The walls at a cusp form an affine diagram: every component is affine (its Gram matrix is singular, of
-    # corank 1), and there are n - 2 + k walls for k components; a missing wall would leave an elliptic component
-    # (the rank of S would still be n - 1) and wrong edges
     G = imat2flz(L.batch_prod(imat(S), imat(S)))
     for comp in comps:
         if fl.fmpz_mat([[G[i, j] for j in comp] for i in comp]).rank() != len(comp) - 1:
             raise RuntimeError(f"The walls at the cusp {_key(z)} do not form an affine diagram")
     if len(S) - len(comps) != L.rank - 2:
         raise RuntimeError(f"The walls at the cusp {_key(z)} do not form an affine diagram of rank n - 2")
-    for dropped in product(*comps):
-        rest = [S[i] for i in range(len(S)) if i not in dropped]
-        result.append((tuple(dropped), _cusp_direction(L, z, rest, [S[i] for i in dropped])))
-    return result
+    return comps
 
 
 def _cusp_direction(L: Lattice, z: IMat, W: List[IMat], D: List[IMat]) -> IMat:
@@ -412,7 +510,7 @@ def _task_edge(L, max_steps, a, edge_walls, dropped, walls, cpp=True):
     fails in C++ (the searches there use floating point), the edge is traced again in Python only, and error is
     the message of C++ (else None)."""
     u = C = None
-    if cpp and edge_cpp is not None:
+    if cpp and edge_cpp is not None and fits_int64(a, *edge_walls, *dropped, *walls):
         try:
             A, ew = L.A.tolist(), [list(w) for w in edge_walls]
             u = edge_cpp.edge_direction(A, list(a), ew, [list(w) for w in dropped])
@@ -432,29 +530,37 @@ def _task_edge(L, max_steps, a, edge_walls, dropped, walls, cpp=True):
     else:
         u = imat(list(u))
     complement = _kernel(L, C, u) if C is not None else None  # else computed per search
-    end, ideal, end_roots = trace_ray(L, a, u, [imat(list(w)) for w in walls], complement, max_steps, use_cpp=cpp)
+    try:
+        end, ideal, end_roots = trace_ray(L, a, u, [imat(list(w)) for w in walls], complement, max_steps,
+                                          use_cpp=cpp)
+    except InfiniteGeodesic as e:
+        # The mirror of the dropped wall crosses the line at a, so its translate crosses it at g(a) (see trace_ray)
+        raise RuntimeError(f"Internal error: no mirror crosses one period of the line of an edge ({e})") from e
     if ideal:
         return _key(end), True, None, None
     alpha = _next_walls(L, W, a, end, end_roots)[-1]
     return _key(end), False, _key(alpha), None
 
 
-def _task_cusp(L, z, edge_walls, m, cpp=True):
+def _task_cusp(L, z, edge_walls, m, cpp=True, drops=True):
     """The walls at a new cusp (reached along an edge with walls edge_walls from the finite point m) and its
-    edges: (walls, [dropped], error), dropped the positions in walls of the walls not containing the edge. With
-    cpp, computed in C++ (edge_cpp.cusp_walls), except if a value might overflow 64/128 bits; if a consistency
-    check fails in C++, the cusp is computed again in Python, and error is the message of C++ (else None)."""
-    if cpp and edge_cpp is not None:
+    edges: (walls, [dropped], error), dropped the positions in walls of the walls not containing the edge (with
+    drops=False, the components of the diagram instead, of which the edges are the products). With cpp, computed in
+    C++ (edge_cpp.cusp_walls), except if a value might overflow 64/128 bits; if a consistency check fails in C++,
+    the cusp is computed again in Python, and error is the message of C++ (else None)."""
+    if cpp and edge_cpp is not None and fits_int64(z, m, *edge_walls):
         try:
             walls, comps = edge_cpp.cusp_walls(L.A.tolist(), int(L.exp), list(z), list(m),
                                                [list(w) for w in edge_walls])
-            return [tuple(w) for w in walls], list(product(*comps)), None
+            return [tuple(w) for w in walls], list(product(*comps)) if drops else [list(c) for c in comps], None
         except OverflowError:
             pass
         except RuntimeError as e:
-            return _task_cusp(L, z, edge_walls, m, cpp=False)[:2] + (str(e),)
+            return _task_cusp(L, z, edge_walls, m, cpp=False, drops=drops)[:2] + (str(e),)
     z, m = imat(list(z)), imat(list(m))
     S = _cusp_local_walls(L, z, [imat(list(w)) for w in edge_walls], m)
+    if not drops:
+        return [_key(w) for w in S], cusp_components(L, z, S), None
     return [_key(w) for w in S], [d for d, _ in cusp_edges(L, z, S)], None
 
 
@@ -471,6 +577,8 @@ def _run_task(kind, args):
     L = _WORKER["L"]
     if kind == "edge":
         return _task_edge(L, _WORKER["max_steps"], *args, cpp=_WORKER["cpp"])
+    if kind == "cusp components":
+        return _task_cusp(L, *args, cpp=_WORKER["cpp"], drops=False)
     return _task_cusp(L, *args, cpp=_WORKER["cpp"])
 
 
@@ -551,7 +659,7 @@ class ChamberTracer:
     at a cusp by its position in the list of the edges of the cusp."""
 
     def __init__(self, L: Lattice, base: List[int] | IMat = None, chamber: List[int] | IMat = None,
-                 max_vertices: int = None, max_steps: int = 200, seed: int = 0, threads: int = 1, cpp: bool = True,
+                 max_vertices: int = None, max_steps: int = None, seed: int = 0, threads: int = 1, cpp: bool = True,
                  symmetry: bool = False, walls_file: str = None, order: str = "random", max_walls: int = None):
         if L.signature[0] != 1 or L.signature[1] == 0:
             raise ValueError("The lattice should be of signature (1, n) with n > 0")
@@ -569,6 +677,10 @@ class ChamberTracer:
         self._done: List[int] = []
         self._drops: Dict[int, List[int]] = {}       # cusp id -> the masks of the dropped walls of its edges
         self._drop_pos: Dict[int, Dict[int, int]] = {}  # cusp id -> {dropped mask: position}
+        # The tree of the traversal: for each vertex, the vertex from which it was first reached and the label of
+        # that edge there (-1 for the start), to reconstruct paths (see path)
+        self._parent = array("q")
+        self._parent_edge = array("q")
         self._parity = 0                              # the XOR of the hashes of the edges at all the vertices
         self._local = 0                               # the number of (vertex, edge at it) pairs
         self._cusps = 0
@@ -656,10 +768,17 @@ class ChamberTracer:
             return [(j, S & ~D) for j, D in enumerate(self._drops[vid])]
         return [(i, S & ~(1 << i)) for i in _bits(S)]
 
-    def _register(self, key, walls, ideal: bool, drops=None, reached=()) -> int:
+    def _register(self, key, walls, ideal: bool, drops=None, reached=(), parent=None) -> int:
         """Registers a new vertex with its walls (for a cusp, with the masks of the dropped walls of its edges);
-        the edges by which it was reached (wall masks) are marked, the others are returned to be queued."""
+        the edges by which it was reached (wall masks) are marked, the others are returned to be queued. parent:
+        (vertex id, wall mask) of the edge by which it was first reached."""
         vid = len(self._keys)
+        if parent is None:
+            self._parent.append(-1)
+            self._parent_edge.append(-1)
+        else:
+            self._parent.append(parent[0])
+            self._parent_edge.append(self._edge_label(*parent))
         self._ids[key] = vid
         self._keys.append(key)
         self._walls.append(self._add_walls(walls))
@@ -683,6 +802,11 @@ class ChamberTracer:
 
     def _mark(self, vid: int, E: int):
         """Marks the edge with the wall mask E at the vertex as traced; it must be an edge at the vertex."""
+        self._done[vid] |= 1 << self._edge_label(vid, E)
+
+    def _edge_label(self, vid: int, E: int) -> int:
+        """The label at the vertex of its edge with the wall mask E (the index of the wall it does not contain at a
+        finite vertex, its position at a cusp); it must be an edge at the vertex."""
         S = self._walls[vid]
         if E & ~S:
             raise RuntimeError("An edge ends at a vertex not containing its walls")
@@ -695,7 +819,19 @@ class ChamberTracer:
             if rest.bit_count() != 1:
                 raise RuntimeError("An edge ends at a finite vertex which does not have it")
             j = rest.bit_length() - 1
-        self._done[vid] |= 1 << j
+        return j
+
+    def path(self, vid: int) -> Tuple[List[int], List[int]]:
+        """The path from the start vertex to the vertex vid in the tree of the traversal: the vertex ids, from the
+        start to vid, and the wall masks of the edges between consecutive ones."""
+        vids, masks = [vid], []
+        while self._parent[vids[-1]] >= 0:
+            child, parent = vids[-1], self._parent[vids[-1]]
+            j = self._parent_edge[child]
+            D = self._drops[parent][j] if self._ideal[parent] else 1 << j
+            masks.append(self._walls[parent] & ~D)
+            vids.append(parent)
+        return vids[::-1], masks[::-1]
 
     def _descend(self) -> Tuple[Tuple[int, ...], List[IMat], bool]:
         """Descends from the base point to a vertex of the chamber (see the module docstring); returns the
@@ -738,8 +874,11 @@ class ChamberTracer:
 
     # --- the traversal ---
 
-    def run(self, progress: bool = False, progress_interval: float = 10) -> dict:
-        """Traces the chamber; returns a summary dictionary (also stored in self.result)."""
+    def run(self, progress: bool = False, progress_interval: float = 10, callback=None,
+            callback_interval: float = 10) -> dict:
+        """Traces the chamber; returns a summary dictionary (also stored in self.result). callback(tracer), if given,
+        is called every callback_interval seconds (e.g. to look for non-reflectivity certificates, see
+        vinberg.nonreflective); if it returns True, the traversal stops (as with max_walls: "complete": False)."""
         L = self.L
         start = last = time.perf_counter()
         gram = [[int(x) for x in row] for row in L.A.tolist()]
@@ -749,6 +888,7 @@ class ChamberTracer:
         else:
             executor = _InlineExecutor(gram, self.max_steps, self.cpp)
         pending = {}                 # future -> (kind, data)
+        waiting_parent = {}          # new cusp key -> (vertex id, wall mask) of the first edge reaching it
         waiting = {}                 # new cusp key -> the wall masks of the edges reaching it, while its walls
         queue = array("q")           # the edges to trace, (vertex id << _SHIFT) | j
         head = 0                     # with order="bfs", the first entry not yet taken
@@ -801,19 +941,20 @@ class ChamberTracer:
                 waiting[key].append(E)
             elif ideal:
                 waiting[key] = [E]
+                waiting_parent[key] = (vid, E)
                 a = self._vector(vid)
                 m = a if not self._ideal[vid] else tuple(x + y for x, y in zip(a, end))
                 submit("cusp", (tuple(end), [self.wall_keys[i] for i in _bits(E)], m), key)
             else:
                 queue.extend(self._register(key, [self.wall_keys[i] for i in _bits(E)] + [alpha], False,
-                                            reached=[E]))
+                                            reached=[E], parent=(vid, E)))
 
-        def new_cusp(key, walls, drops, reached=()):
+        def new_cusp(key, walls, drops, reached=(), parent=None):
             """Registers a cusp with its walls and its edges (the positions in walls of the dropped walls)."""
             self._add_walls(walls)
             S = [self.wall_index[_key(w)] for w in walls]
             masks = [sum(1 << S[i] for i in d) for d in drops]
-            queue.extend(self._register(key, walls, True, drops=masks, reached=reached))
+            queue.extend(self._register(key, walls, True, drops=masks, reached=reached, parent=parent))
 
         # The start vertex (in this process)
         v, walls, ideal = self._descend()
@@ -823,10 +964,16 @@ class ChamberTracer:
         else:
             queue.extend(self._register(self._pack(first), [_key(w) for w in walls], False))
         try:
+            last_callback = time.perf_counter()
             while len(queue) > head or pending:
                 if self.max_walls is not None and len(self.walls) >= self.max_walls:
                     stopped = True
                     break
+                if callback is not None and time.perf_counter() - last_callback >= callback_interval:
+                    last_callback = time.perf_counter()
+                    if callback(self):
+                        stopped = True
+                        break
                 while len(queue) > head and len(pending) < window:
                     entry = take()
                     vid, j = entry >> _SHIFT, entry & ((1 << _SHIFT) - 1)
@@ -862,7 +1009,7 @@ class ChamberTracer:
                                                     "error": error})
                             if progress:
                                 print(f"C++ failed on a cusp ({error}), computed again in Python", flush=True)
-                        new_cusp(data, walls, drops, reached=waiting.pop(data))
+                        new_cusp(data, walls, drops, reached=waiting.pop(data), parent=waiting_parent.pop(data))
                 now = time.perf_counter()
                 if progress and now - last >= progress_interval:
                     last = now
@@ -886,7 +1033,7 @@ class ChamberTracer:
                        "cpp_errors": len(self.cpp_errors), "start": first,
                        "seconds": round(time.perf_counter() - start, 3)}
         if progress and stopped:
-            print(f"[{self.result['seconds']:.0f} s] stopped at {len(self.walls)} walls (max_walls): "
+            print(f"[{self.result['seconds']:.0f} s] stopped at {len(self.walls)} walls (max_walls or callback): "
                   f"{self.result['vertices']} vertices, {self.result['cusps']} cusps, {traced} edges traced so far",
                   flush=True)
         elif progress:

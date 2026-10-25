@@ -260,7 +260,7 @@ class OrbitTracer:
     "ideal", "degree" (number of edges), "orbit" (size of the H-orbit)}."""
 
     def __init__(self, L: Lattice, walls: Sequence, symmetry: ChamberSymmetry = None, base=None, chamber=None,
-                 seed: int = 0, threads: int = 1, cpp: bool = True, max_steps: int = 200,
+                 seed: int = 0, threads: int = 1, cpp: bool = True, max_steps: int = None,
                  max_representatives: int = None, method: str = "auto", representatives: Sequence[dict] = None):
         self.L = L
         # With representatives (from a certificate, see verify_certificate): no new representative is accepted, every

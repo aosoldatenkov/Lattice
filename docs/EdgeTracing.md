@@ -17,6 +17,8 @@ Code references:
 | Roots through a cusp | `src/lattice/vinberg/walls.py` (`cusp_root_classes`, `cusp_walls`; in C++ `edge_cpp.cusp_walls`) |
 | Coxeter diagram of the walls, symmetries (§9) | `src/lattice/vinberg/coxeter.py` (`WallDiagram`, `ChamberSymmetry`; needs `pynauty`) |
 | Tracing and certification up to symmetry (§9) | `src/lattice/vinberg/orbits.py` (`OrbitTracer`, `trace_chamber_by_orbits`, `verify_certificate`, `GroupAction`) |
+| Certificates of non-reflectivity (§10) | `src/lattice/vinberg/nonreflective.py` (`search_nonreflective`, `SymmetrySearch`, `verify_certificate`) |
+| The chamber modulo its symmetries (§11) | `src/lattice/vinberg/quotient.py` (`quotient_chamber`, `QuotientTracer`, `verify_quotient`) |
 | Pictures of Coxeter diagrams | `src/lattice/draw/diagram.py` (`CoxeterDiagram`, `draw_Coxeter_diagram`) |
 | Conway's river of a binary lattice | `src/lattice/binary.py` (`BinLattice`) |
 | Root system at a point (height 0 of a search), used for the start vertex | `src/lattice/vinberg/certify.py` (`roots_by_height`) |
@@ -77,14 +79,28 @@ so that $t \in (0, \infty)$ covers the segment $(a, z')$. Three cases, in this o
    of each negative norm (§4).
 3. **Irrational ideal end** (then $a$ is finite and $\Pi$ is anisotropic). The edge must end at a crossing,
    at a distance not known in advance. The walk follows **Conway's river** of the binary lattice
-   $\Pi \cap L$ (`_river_points`): the positive vectors on its bank, i.e. one period of the river
+   $\Pi \cap L$ (`_river`): the positive vectors on its bank, i.e. one period of the river
    (`BinLattice.river`) shifted by the powers of its automorphism (`BinLattice.shift`), ordered by their
    position $t$ along the line. They approach the ideal point; consecutive ones are close (one edge of the
    river), and their norms are small (bounded by the discriminant of $\Pi \cap L$). The overlapping
    segments $(c_{j-1}, c_{j+1})$ are searched one after the other, so that each point $c_j$ lies in the
    interior of a searched segment, until a crossing is found. The last bank vector of a period is the first
-   one of the next; repeated points are skipped, since they would break the overlapping. For a chamber of
-   finite volume the walk terminates; `max_steps` bounds it otherwise.
+   one of the next; repeated points are skipped, since they would break the overlapping.
+
+   **The walk is bounded.** Let $M = \Pi \cap L$, $N = \Pi^\perp \cap L$, and $\varepsilon$ the fundamental
+   automorphism of $M$ (a translation along the line, in the direction of the walk). Then
+   $g = \varepsilon^k \oplus \mathrm{id}_N$ preserves $L$ as soon as $\varepsilon^k$ acts trivially on the glue
+   group $L/(M \oplus N)$, i.e. on the projections of $L$ to $\Pi$ modulo $M$; the smallest such $k$ is computed
+   by iterating $\varepsilon$ modulo the discriminant of $M$ (`_plane_period`), and $k \le |\mathrm{Aut}(L/(M \oplus N))|$.
+   Since $g \in O(L)$ maps mirrors to mirrors, the set of mirrors crossing the line is invariant under the
+   translation $g$: checking one period $(a, g(a)]$ decides the whole line. From a vertex $a$, the mirror of the
+   wall at $a$ which does not contain the edge crosses the line at $a$, so its image crosses it at $g(a)$: **the
+   edge ends at $g(a)$ at the latest**, and an edge never runs to an irrational ideal point (on the edges of the
+   Allcock polygons and of $I_{1,n}$, $n \le 14$: $k = 1$ for 91% of 33564 edges, at most 6; some edges end exactly
+   at $g(a)$). A ray from a point on no transversal mirror (as in the descent from the base point) can cross no
+   mirror over a whole period: then the closed chamber contains the whole geodesic, with irrational ends, so it
+   has infinite volume and the lattice is not reflective (`InfiniteGeodesic`). `max_steps` (no default) only
+   bounds the walk further.
 
 At a finite end, `trace_ray` also returns all the roots through the end with $(r, a) > 0$, from which the
 new wall is computed (§5).
@@ -328,3 +344,137 @@ for irrational ends (Allcock's 360.6: 34 s before, 0.2 s after); and the C++ cor
 - **Coxeter diagrams.** Vertices and edges could be identified by their sets of walls alone (elliptic and
   parabolic subdiagrams), and the diagram gives free consistency checks (each edge has two ends, the f-vector,
   the Euler characteristic).
+
+## 10. Non-reflectivity (`nonreflective.py`)
+
+$L$ is reflective iff $\mathrm{Sym}(C)$ is finite ($O^+(L) = W(L) \rtimes \mathrm{Sym}(C)$). $\mathrm{Sym}(C)$ has finitely
+many orbits of vertices, and if infinite it has elements of infinite order (finitely generated and linear: Schur).
+So the traversal of the 1-skeleton either ends (reflective, certified) or meets two vertices exchanged by a symmetry
+of infinite order: `search_nonreflective` runs both at once (the tracer calls `SymmetrySearch.update` every
+`check_interval` seconds through its `callback`; nothing changes in the tracer otherwise).
+
+**Identifications.** A symmetry mapping a finite vertex $x$ to a vertex $r$ maps walls to walls: it is
+$g = B_x^{-1} P_\sigma B_r$ for a bijection $\sigma$ of the walls preserving their products (an isomorphism of the local
+diagrams) and $(x, x) = (r, r)$, in the bases $B = (\text{walls}, \text{vertex})$; such a $g$ is an isometry, and a
+symmetry of $C$ iff it is integral (the local cones at $x$ and $r$ correspond). In these coordinates $L$ is the
+lattice $\Lambda_x = \mathbb{Z}^n B_x^{-1}$, and $g$ is integral iff $\Lambda_x P_\sigma = \Lambda_r$. The finite
+vertices are grouped by $(x, x)$ and the canonical form of their local diagram (nauty); each class keeps a
+representative $r$ with the orbit of $\Lambda_r$ under the automorphisms of its local diagram (keys: Hermite normal
+forms; a transversal), so that a new vertex costs one canonical labeling, one isomorphism and one lookup, also for
+local diagrams like $A_1^{20}$ whose automorphism groups cannot be enumerated. The elements found, and the products
+$g h^{-1}$ of elements of a class, are tested for infinite order (a non-cyclotomic factor of the characteristic
+polynomial, or $g^m \ne 1$ for $m$ the lcm of the cyclotomic orders).
+
+**Infinite geodesics.** A geodesic with irrational ends crossed by no mirror lies in the closure of one chamber,
+which then has infinite volume. By §3 one period of the stabilizer of its plane decides it; the descent from the
+base point (which starts on no transversal mirror) raises `InfiniteGeodesic` when it happens.
+
+**Certificates** (JSON): for a symmetry, the root vertex with its walls, the paths of edges (their walls) from the
+root to the vertices identified, the bijections, and a word in the identifications (one, or $g h^{-1}$); for a
+geodesic, the point and the direction. `verify_certificate` checks the walls at the root (the simple roots of its
+local root system), retraces the paths with the searches of the tracer, recomputes the isometries and the order;
+for a geodesic, recomputes the period and checks that one period meets no mirror. The tracer keeps one parent
+pointer per vertex for the paths (`ChamberTracer.path`).
+
+**Results.** No certificate on any of the 8595 lattices of Allcock's list nor on $I_{1,n}$, $n \le 14$ (26771
+identifications made along the way, all of finite order). Decided in a fraction of a second each: the 210
+lattices $\langle 1 \rangle \oplus \langle -a \rangle \oplus \langle -b \rangle$, $a \le b \le 20$ (148 reflective, 62 not:
+61 by symmetries, 1 by a geodesic); $\langle k \rangle \oplus A_3(-1)$ and $\langle k \rangle \oplus \langle -1 \rangle \oplus
+A_2(-1)$, $k \le 30$ (17 reflective each); Baragar's $\Lambda_9$ (the Apollonian lattice of rank 9) is not reflective.
+
+**The structure of $\mathrm{Sym}(C)$** (`analyze_symmetries`, `search_nonreflective(n_elements=...)`, which goes on
+until that many symmetries of infinite order are found). By Nikulin (Reflection groups in hyperbolic spaces and the
+denominator formula for Lorentzian Kac–Moody algebras, Def. 1.1.2, 1.3.1, Thm. 1.1.3), the reflection group is
+*parabolic* if $\mathrm{Sym}(C)$ is infinite and fixes a primitive isotropic vector (a cusp), e.g. when $C$ has a
+lattice Weyl vector $\rho$ ($(\rho, r) = -(r, r)/2$ for all walls) of norm 0, which all the symmetries fix; then
+$\mathrm{Sym}(C)$ lies in the stabilizer of the cusp, a Euclidean crystallographic group (virtually
+$\mathbb{Z}^{n-2}$); for rank $\ge 3$ there are finitely many parabolic reflective lattices up to similarity. An
+infinite virtually abelian discrete group either fixes a cusp (its elements of infinite order are parabolic with
+that fixed point) or is virtually cyclic (hyperbolic elements with a common axis; commutators of finite order).
+Each element found is classified (`classify_element`: a Salem factor of the characteristic polynomial for a
+hyperbolic element; for a parabolic one, its cusp is the radical of the form on the fixed space of a unipotent
+power), and the verdict is "parabolic" (all the elements found fix the cusp of the parabolic ones; the heights
+$(c, r)$ on the traced walls are reported), "virtually cyclic" (consistent commutators), or "non-elementary"
+(rigorous: two parabolic elements with different cusps, a parabolic and a hyperbolic one, an element not fixing the
+cusp, or a commutator of infinite order). `weyl_vector` solves $(\rho, r) = -(r, r)/2$ on the traced walls: if
+inconsistent, there is no lattice Weyl vector (rigorous). Examples: $\Lambda_9$, $\Lambda_{10}$ (Apollonian) and
+the 7-dimensional Descartes lattice of Graham et al. are parabolic (Λ₉: $(c, r) = 2$ on the norm $-1$ walls, $0$ or
+$2$ on the norm $-4$ walls, so $c/4$ is a Weyl vector of the norm $-1$ walls only); $\langle 14 \rangle \oplus A_3(-1)$
+and $\langle 26 \rangle \oplus A_3(-1)$ are parabolic; $\langle 7 \rangle \oplus A_3(-1)$ and the non-reflective
+$\langle 1 \rangle \oplus \langle -a \rangle \oplus \langle -b \rangle$ tried are virtually cyclic; $I_{1,20}$ and
+$\langle 19 \rangle \oplus A_3(-1)$ are non-elementary; none of them has a lattice Weyl vector. For $E_{10}$ the
+Weyl vector has norm 1240.
+
+
+
+## 11. The chamber modulo its symmetries (`quotient.py`)
+
+**Traversal.** One representative per $\mathrm{Sym}(C)$-orbit of vertices: one edge per orbit of the stabilizer of
+each representative is traced, and an end is identified with a representative $r$ by an integral isometry $g$ mapping
+it to $r$ and its walls to the walls of $r$ (a symmetry of $C$, by the local cones), or becomes a new representative.
+The identifications are complete, so the traversal **terminates for every lattice**: a finite vertex of a chamber is
+cut out by simple roots of bounded norms, hence has a bounded norm, the positive vectors of bounded norm and the cusps
+form finitely many $O^+(L)$-orbits, and two vertices of $C$ in the same $O^+(L)$-orbit are in the same
+$\mathrm{Sym}(C)$-orbit (the closure of $C$ is a strict fundamental domain of $W$).
+
+**Frames and glue graphs.** A *frame* is a basis $B = (w_1, \dots, w_k, s_1, \dots, s_t)$ of $V$ of walls and special
+vectors: a finite vertex $(\text{walls}, x)$, or a framed edge $(E, z, z')$ at a cusp $z$, with $E$ the $n - 2$ walls of
+the edge and $z'$ the other isotropic line of its plane $E^\perp$. An isometry mapping a frame to another, the wall $i$
+to the wall $\sigma(i)$ and the special vectors to the special vectors, is $g = B^{-1} P_\sigma B'$; it is integral iff
+$\Lambda P_\sigma = \Lambda'$ for the lattices $\Lambda = \mathbb{Z}^n B^{-1}$, i.e. iff $P_\sigma$ maps the glue group
+$G = \Lambda/\mathbb{Z}^n = L/\mathrm{span}(B)$ to $G'$. $G$ may be large: it contains the glue between the walls and
+their orthogonal complement, up to $2^{24}$ elements at an edge of $II_{1,25}$. But it is an extension of its
+projection $Q$ to the special coordinates (at most $t$ generators, canonical by the HNF, and fixed by $P_\sigma$) by
+$K = (L \cap \mathrm{span}(\text{walls}))/\mathrm{span}(\text{walls})$, and $P_\sigma$ preserves $G$ iff it preserves
+$K$ and the fibres of $G$ over the generators of $Q$. The *glue graph* has the walls (with their products as edge
+colours) and the elements of $K - 0$ and of these fibres (vectors modulo the exponent; at most $(t + 1)|K|$ nodes,
+nauty being dense), each joined to the walls by its coordinates and coloured by its fibre; its automorphisms are the
+stabilizer of the frame, and its canonical form (nauty) identifies frames, without enumerating the automorphisms of
+the diagram. The glue graphs are computed by the worker processes. Such an isometry of frames of $C$
+maps $C$ to $C$ (it maps the local cone at the vertex or the edge to that of the image). Finite vertices with few
+diagram automorphisms (at most `max_orbit`) are identified as in §10 (the orbit of $\Lambda_x$), the others by their
+glue graphs (at most `max_glue` elements of $G$).
+
+**Cusps.** The edges at a cusp $z$ drop one wall from each component of its affine diagram, which makes
+$\prod (\text{size of the component})$ edges, up to $2^{24}$ at $\tilde A_1^{24}$; two edges are adjacent if they differ
+in one component. The orbits of $\mathrm{Stab}(z)$ on them are found by a search over this graph from the edge of
+arrival, one representative edge per orbit, the framed edges being compared by their glue graphs (an isometry of two
+framed edges at $z$ fixes $z$). Since $\mathrm{Stab}(z)$ acts on this connected graph, it is generated by the
+stabilizers of the representative edges and the *transitions* (elements mapping the neighbours of the representative
+edges to representative edges), by the same closure argument as for the traversal. Another cusp is identified with
+$z$ along its edge of arrival, by the key of that framed edge (every edge at $z$ is in the orbit of a representative
+edge), so its walls are computed only if it is new. $U \oplus A_2(-1)^6$ has a cusp $\tilde A_1^{12}$ with 4096 edges
+in 7 orbits.
+
+**Generators.** With $H$ generated by the identifications and the stabilizers of the representatives (needed since
+their edges are traced up to them), $H \cdot \{\text{representatives}\}$ is closed under adjacency, hence the whole
+1-skeleton; the first representative $r_0$ is in no other's orbit, so $\mathrm{Sym}(C) = H \cdot \mathrm{Stab}(r_0)$,
+and the generators of $\mathrm{Sym}(C) = O^+(L)/W(L)$ are complete. The walls at the representatives represent all the
+orbits of walls.
+
+**Structure** (rigorous): *finite* if the orbit of the walls at the representatives under the generators closes
+(then it is the set of all the walls of $C$, $\mathrm{Sym}(C)$ acts faithfully on it, and $L$ is reflective; the order
+by Schreier–Sims); otherwise an element of infinite order is found (a generator, a product of two, or a nontrivial
+element of the kernel of the reduction modulo 3, torsion-free by Minkowski, among the Schreier generators of the image
+in $GL_n(\mathbb{F}_3)$), and if it is parabolic and all the generators fix its cusp $c$, *parabolic*: $\mathrm{Sym}(C)$
+fixes $c$, and the heights $(c, r)$ at the representatives are those of all the walls (so $c$ is a generalized lattice
+Weyl vector, and a lattice Weyl vector up to scaling iff they are proportional to $-(r, r)/2$). A hyperbolic element
+$h$ (eigenvalue $\lambda > 1$, a Salem number or a quadratic unit, of the irreducible factor $f$ of its characteristic
+polynomial): the rational hull of its axis (the geodesic between its isotropic eigenvectors $v_\pm$) is
+$V_f = \ker f(h)$, on which $h^{\pm 1}$ has a single eigenline for $\lambda$; so a generator $g$ preserves the pair
+$\{v_+, v_-\}$ iff $g V_f = V_f$ and $g^{-1} h g = h^{\pm 1}$ on $V_f$ (exact, rational). If all the generators do,
+$\mathrm{Sym}(C)$ is in the stabilizer of the axis: *virtually cyclic* (with "reverses" if some generator swaps its
+ends); otherwise $h$ and a conjugate have disjoint pairs of fixed points at infinity (a common one would contradict the
+discreteness), and $\mathrm{Sym}(C)$ contains a free group: *non-elementary* (also for a parabolic element whose cusp is
+not fixed by all the generators). $\langle k \rangle \oplus A_3(-1)$: virtually cyclic for $k = 7$ ($\lambda \approx
+11.76$, of degree 4), 11, 34 (quadratic), non-elementary for $k = 19, 23, 29, 31, 35$. The certificate lists the representatives
+with their parent edges and traced edges (at a cusp, the representative edges and the transitions) and the
+identifications with their bijections of walls; `verify_quotient` retraces the traced edges, recomputes the orbits of
+edges at the finite representatives, checks the transitions at the cusps and the identifications (integral isometries
+mapping the walls to the walls), the inequivalence of $r_0$, its stabilizer, and the structure.
+
+**Results.** $U \oplus A_2^3$, $U \oplus D_4^3$, $I_{1,14}$: finite (orders 6, 6, 2, as in §9). Parabolic, certified:
+$\Lambda_9$ (8 representatives), $\Lambda_{10}$ (13), the 7-dimensional Descartes lattice (8), $\langle 14 \rangle \oplus
+A_3(-1)$ (3); the heights of their cusps are bounded and $\ge 0$, not proportional to $-(r, r)/2$ (generalized, not
+strict, Weyl vectors), and the walls through the cusp have rank $< n - 1$. $U \oplus A_2(-1)^6$ is parabolic with
+heights proportional to $-(r, r)/2$: a lattice Weyl vector of norm 0, as for $II_{1,25}$.
