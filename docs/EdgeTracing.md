@@ -145,8 +145,8 @@ irrational end uses the bank vectors of the river.
 **A new finite vertex** $v'$, reached along an edge with walls $W$ from $a$ (`_next_walls`). The walls at $v'$
 are $W$ and one more simple root $\alpha$ of $R_{v'}$. The chamber of $R_{v'}$ containing $C$ contains
 $\mathrm{dir} = K u' + y$ for $K$ large, where $u' = (v', v') a - (a, v') v'$ points back along the edge and
-$y \in \operatorname{span}(W)$ has $(y, w) = 1$ for $w \in W$; the roots orthogonal to $u'$ are orthogonal to
-the edge, hence in $\operatorname{span}(W)$. For a root $r$ through $v'$,
+$y \in \mathrm{span}(W)$ has $(y, w) = 1$ for $w \in W$; the roots orthogonal to $u'$ are orthogonal to
+the edge, hence in $\mathrm{span}(W)$. For a root $r$ through $v'$,
 $(\mathrm{dir}, r) = K (v', v') (r, a) + (y, r)$, so $\alpha$, the first positive root independent of $W$ in
 this ordering, is the root through $v'$ with the smallest $(r, a) > 0$, then the smallest $(y, r)$. All these
 roots are returned by the edge search (the roots crossing at the end point, or the roots through the end
@@ -478,3 +478,23 @@ $\Lambda_9$ (8 representatives), $\Lambda_{10}$ (13), the 7-dimensional Descarte
 A_3(-1)$ (3); the heights of their cusps are bounded and $\ge 0$, not proportional to $-(r, r)/2$ (generalized, not
 strict, Weyl vectors), and the walls through the cusp have rank $< n - 1$. $U \oplus A_2(-1)^6$ is parabolic with
 heights proportional to $-(r, r)/2$: a lattice Weyl vector of norm 0, as for $II_{1,25}$.
+
+## 12. Readable reports (`report.py`)
+
+`certificate_report(cert, path)` renders a certificate (or a walls file) as a LaTeX document compiled to PDF: the
+lattice (Gram matrix, the discriminant group with its generators in the coordinates of $L$, the discriminant form —
+$b$ modulo $\mathbb{Z}$, and $q$ modulo $2\mathbb{Z}$ on the diagonal for an even lattice —, the Conway–Sloane genus
+symbol, the base point), the claim of the certificate in words, and its content:
+- `orbits`: the walls with their orbits under $\mathrm{Sym}(C)$ and the Coxeter diagram (up to `diagram` walls), the
+  generators of $\mathrm{Sym}(C)$ as permutations of the walls and matrices, and the representatives of the vertices
+  with the types of their local diagrams (`coxeter.diagram_type`: $A_n, \ldots, G_2$ and $\tilde A_n, \ldots, \tilde
+  G_2$) and the sizes of their orbits;
+- `nonreflective`: the root vertex, the identifications (vertices, paths, bijections of the walls, matrices), and the
+  element of infinite order with its factored characteristic polynomial and type; or the geodesic, its plane and the
+  translation $g$;
+- `quotient`: the structure of $\mathrm{Sym}(C)$ (order; fixed cusp, heights and Weyl vector; the axis, the Salem
+  polynomial and the lattice of its rational hull), the representatives, and the walls at the representatives.
+
+Everything is read from the certificate or recomputed cheaply from its vectors (norms, heights, diagram types); with
+`verify=True` the verification function is also run and its outcome reported. Indices start at 0, as in the files.
+

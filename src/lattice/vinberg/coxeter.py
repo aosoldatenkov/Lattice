@@ -85,6 +85,17 @@ class WallDiagram:
     def rank(self) -> int:
         return fl.fmpz_mat([list(w) for w in self.walls]).rank() if self.walls else 0
 
+    def type(self, subset: Sequence[int] = None) -> List[str]:
+        """The types of the connected components of the diagram of the walls (or of the walls with the indices in
+        subset), sorted: see diagram_type."""
+        labels = self.labels()
+        if subset is not None:
+            position = {i: t for t, i in enumerate(subset)}
+            labels = {(position[i], position[j]): lab for (i, j), lab in labels.items()
+                      if i in position and j in position}
+            return diagram_type(len(position), labels)
+        return diagram_type(len(self.walls), labels)
+
     # --- symmetries ---
 
     def nauty_graph(self, kind: str = "gram"):
@@ -262,3 +273,101 @@ class ChamberSymmetry:
     def __repr__(self) -> str:
         sizes = sorted((len(o) for o in self.wall_orbits), reverse=True)
         return f"ChamberSymmetry(order {self.order}, {len(self.generators)} generators, wall orbits {sizes})"
+
+
+def diagram_type(k: int, labels: Dict[Tuple[int, int], object]) -> List[str]:
+    """The types of the connected components of a Coxeter diagram on k nodes with the labels {(i, j): label} (as in
+    WallDiagram.labels: 3, 4, 6, 'inf', or cos^2 > 1), sorted: the spherical ones "A_n", "B_n" (= C_n as a Coxeter
+    group), "D_n", "E_6", "E_7", "E_8", "F_4", "G_2", the affine ones "A~_n", "B~_n", "C~_n", "D~_n", "E~_6", "E~_7",
+    "E~_8", "F~_4", "G~_2", and "?_m" for a component on m nodes of another kind (e.g. with an ultraparallel pair)."""
+    adj: Dict[int, Dict[int, object]] = {i: {} for i in range(k)}
+    for (i, j), lab in labels.items():
+        adj[i][j] = adj[j][i] = lab
+    seen, types = set(), []
+    for start in range(k):
+        if start in seen:
+            continue
+        comp, stack = [], [start]
+        seen.add(start)
+        while stack:
+            i = stack.pop()
+            comp.append(i)
+            for j in adj[i]:
+                if j not in seen:
+                    seen.add(j)
+                    stack.append(j)
+        types.append(_component_type(comp, adj))
+    order = lambda t: (t.startswith("?"), "~" in t, t[0], int(t.split("_")[1]))
+    return sorted(types, key=order)
+
+
+def _component_type(comp: List[int], adj) -> str:
+    n = len(comp)
+    unknown = f"?_{n}"
+    if n == 1:
+        return "A_1"
+    edges = {(min(i, j), max(i, j)): lab for i in comp for j, lab in adj[i].items()}
+    labs = list(edges.values())
+    if any(isinstance(lab, Fraction) for lab in labs):
+        return unknown
+    if labs == ["inf"]:
+        return "A~_1"
+    if "inf" in labs:
+        return unknown
+    degree = {i: len(adj[i]) for i in comp}
+    if len(edges) == n:                                       # a cycle
+        return f"A~_{n - 1}" if all(d == 2 for d in degree.values()) and set(labs) == {3} else unknown
+    if len(edges) != n - 1:
+        return unknown
+    if max(degree.values()) <= 2:                             # a path: the labels along it
+        end = next(i for i in comp if degree[i] == 1)
+        path, prev = [end], None
+        while len(path) < n:
+            nxt = next(j for j in adj[path[-1]] if j != prev)
+            prev = path[-1]
+            path.append(nxt)
+        seq = [adj[path[t]][path[t + 1]] for t in range(n - 1)]
+        if seq[0] != 3 and seq[-1] == 3:
+            seq = seq[::-1]
+        if set(seq) == {3}:
+            return f"A_{n}"
+        if seq == [6]:
+            return "G_2"
+        if seq == [3, 6]:
+            return "G~_2"
+        if seq.count(4) == 1 and seq[-1] == 4 and set(seq[:-1]) <= {3}:
+            return f"B_{n}"
+        if seq == [3, 4, 3]:
+            return "F_4"
+        if seq in ([3, 3, 4, 3], [3, 4, 3, 3]):
+            return "F~_4"
+        if seq.count(4) == 2 and seq[0] == seq[-1] == 4 and set(seq[1:-1]) <= {3}:
+            return f"C~_{n - 1}"
+        return unknown
+    branch = [i for i in comp if degree[i] >= 3]
+    if len(branch) == 1 and degree[branch[0]] == 4:
+        return "D~_4" if set(labs) == {3} and n == 5 else unknown
+    if len(branch) == 2 and set(labs) == {3}:
+        # D~_n: two forks, each with two leaves
+        return f"D~_{n - 1}" if all(sum(degree[j] == 1 for j in adj[b]) == 2 for b in branch) else unknown
+    if len(branch) != 1:
+        return unknown
+    c = branch[0]
+    legs = []                                                  # (length, the label at the end of the leg)
+    for j in adj[c]:
+        length, prev, cur, last = 1, c, j, adj[c][j]
+        while degree[cur] == 2:
+            nxt = next(x for x in adj[cur] if x != prev)
+            last = adj[cur][nxt]
+            prev, cur, length = cur, nxt, length + 1
+        legs.append((length, last))
+    legs.sort()
+    lengths = tuple(length for length, _ in legs)
+    if set(labs) == {3}:
+        if lengths[:2] == (1, 1):
+            return f"D_{n}"
+        return {(1, 2, 2): "E_6", (1, 2, 3): "E_7", (1, 2, 4): "E_8", (2, 2, 2): "E~_6", (1, 3, 3): "E~_7",
+                (1, 2, 5): "E~_8"}.get(lengths, unknown)
+    if labs.count(4) == 1 and lengths[:2] == (1, 1) and legs[2][1] == 4:
+        return f"B~_{n - 1}"
+    return unknown

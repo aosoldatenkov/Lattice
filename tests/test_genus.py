@@ -48,7 +48,7 @@ SAMPLES = ([L.A.tolist() for L in LATTICES.values()] + random_grams(21, 80, rang
 
 
 def test_symbol_string():
-    assert Genus(U_lat() + E_lat(8)(-1)).str() == "II_{1, 9}()"
+    assert Genus(U_lat() + E_lat(8)(-1)).str() == "II_{1, 9}"
     assert Genus(diag(1, -4, 3)).str() == "I_{2, 1}(1_{4}^{-2}4_{7}^{1}:1^{-2}3^{1})"
     assert Genus(diag(1, -4, 3)).str(5) == ""
 

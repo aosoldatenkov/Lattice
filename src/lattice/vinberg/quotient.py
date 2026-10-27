@@ -673,8 +673,28 @@ class QuotientTracer:
                                      "transitions": [[j, list(d), t, sigma] for j, d, t, sigma, _ in
                                                      r["local"].transitions]} if r["ideal"] else {})} for r in reps],
             "identifications": [{k: v for k, v in i.items() if k != "matrix"} for i in self.identifications],
-            "structure": {k: v for k, v in self.result.items() if k in ("structure", "cusp", "word", "walls")},
+            "structure": _stated(self.result),
         }
+
+
+# The keys of the analysis stated in a certificate (only "structure" and "cusp" are compared by the verification,
+# which recomputes the others)
+_STATED = ("structure", "cusp", "word", "walls", "order", "element", "heights", "generalized Weyl vector",
+           "Weyl vector", "rank of the walls through the cusp", "salem polynomial", "lambda", "reverses",
+           "hyperbolic element", "axis", "moves the axis")
+
+
+def _stated(result: dict) -> dict:
+    """The analysis as JSON data: rational numbers as strings, tuples as lists."""
+    def plain(x):
+        if isinstance(x, (list, tuple)):
+            return [plain(y) for y in x]
+        if isinstance(x, dict):
+            return {k: plain(v) for k, v in x.items()}
+        if isinstance(x, (fl.fmpq, fl.fmpz)):
+            return int(x) if x == int(x) else str(x)
+        return x
+    return {k: plain(v) for k, v in result.items() if k in _STATED}
 
 
 def _orbit_closure(walls, generators, max_size: int):
@@ -807,7 +827,7 @@ def _axis(L: Lattice, generators, h: fl.fmpz_mat, base) -> dict:
     stabilizer of the axis, virtually cyclic (an extension of Z or D_infinity, "reverses": some generator swaps the
     ends, by a finite group); otherwise h and g^-1 h g have disjoint pairs of fixed points at infinity (a common one
     would contradict the discreteness), and Sym(C) contains a free group (ping-pong): non-elementary.
-    In the virtually cyclic case, also "element": h (row action), and "axis": its endpoints, exactly: for a nonzero u
+    In the virtually cyclic case, also "hyperbolic element": h (row action), and "axis": its endpoints, exactly: for a nonzero u
     in V_f and f = sum a_i x^i of degree d, v(mu) = u f(h) / (h - mu) = sum_j mu^j c_j with the integer vectors
     c_j = sum_k a_(k + j + 1) u h^k is an eigenvector for every root mu of f; "coefficients": [c_0, ..., c_(d-1)],
     "signs": [s+, s-] with v+ = s+ v(lambda), v- = s- v(1/lambda) future-directed, and "plus", "minus": v+, v-
@@ -854,7 +874,7 @@ def _axis(L: Lattice, generators, h: fl.fmpz_mat, base) -> dict:
     plus, minus = signs[0] * v[0], signs[1] * v[1]
     scale = math.sqrt(plus @ A @ minus)
     return {"structure": "virtually cyclic", "salem polynomial": a, "lambda": lam, "reverses": reverses,
-            "element": [[int(h[i, j]) for j in range(n)] for i in range(n)],
+            "hyperbolic element": [[int(h[i, j]) for j in range(n)] for i in range(n)],
             "axis": {"lattice": sub, "coefficients": coefficients, "signs": signs,
                      "plus": (plus / scale).tolist(), "minus": (minus / scale).tolist()}}
 

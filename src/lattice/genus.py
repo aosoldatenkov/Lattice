@@ -121,8 +121,8 @@ class Genus:
         return True
 
     def str(self, p = None):
-        """Returns the genus symbol in LaTeX notation, e.g. II_{1, 9}() for U + E8(-1), or
-        I_{2, 1}(1_{4}^{-2}4_{7}^{1}:1^{-2}3^{1}) for diag(1, -4, 3), or the p-adic symbol if p is given
+        """Returns the genus symbol in LaTeX notation, e.g. II_{1, 9} for U + E8(-1) (no brackets for a
+        unimodular lattice), or I_{2, 1}(1_{4}^{-2}4_{7}^{1}:1^{-2}3^{1}) for diag(1, -4, 3), or the p-adic symbol if p is given
         (the empty string if p does not divide the discriminant). Each constituent is written
         as q^{ε n} for p odd, q_{t}^{ε n} for p = 2 and type I, and q^{ε n} for p = 2 and
         type II, including the unimodular constituent q = 1. The 2-adic part is written for
@@ -132,7 +132,7 @@ class Genus:
             s = "I_{"  if self.parity else "II_{"
             s += f"{self.signature[0]}, {self.signature[1]}" + "}("
             s += ":".join([self.str(p) for p in sorted(self.sym.keys())]) + ")"
-            return s
+            return s if len(self.sym.keys()) > 0 else s[:-2]
         if p not in self.sym:
             return ""
         if p > 2:

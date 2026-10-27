@@ -5,7 +5,8 @@ from lattice._matrix import imat
 from lattice.lattice import Lattice
 from lattice.catalogue import A_lat, D_lat, E_lat, U_lat, I_lat
 from lattice.roots import Coxeter_graph
-from lattice.vinberg.coxeter import WallDiagram
+from fractions import Fraction
+from lattice.vinberg.coxeter import WallDiagram, diagram_type
 from lattice.vinberg.trace import ChamberTracer, trace_chamber
 
 pynauty = pytest.importorskip("pynauty")
@@ -71,3 +72,39 @@ def test_tracer_reports_symmetries(capsys):
     assert res["symmetry"].order == 6
     assert len(tracer.diagram) == len(tracer.walls) and tracer.diagram.walls == [tuple(int(x) for x in w) for w in tracer.walls]
     assert "symmetries of the 10 walls: order 6, 4 orbits of walls [3 x 3, 1]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("k, labels, expected", [
+    (3, {(0, 1): 3, (1, 2): 3}, ["A_3"]),
+    (4, {(0, 1): 3, (1, 2): 3, (2, 3): 4}, ["B_4"]),
+    (2, {(0, 1): 6}, ["G_2"]),
+    (4, {(0, 1): 3, (1, 2): 4, (2, 3): 3}, ["F_4"]),
+    (4, {(0, 1): 3, (0, 2): 3, (0, 3): 3}, ["D_4"]),
+    (6, {(0, 1): 3, (1, 2): 3, (2, 3): 3, (2, 4): 3, (4, 5): 3}, ["E_6"]),
+    (8, {**{(i, i + 1): 3 for i in range(6)}, (2, 7): 3}, ["E_8"]),
+    (2, {(0, 1): 'inf'}, ["A~_1"]),
+    (4, {(0, 1): 3, (1, 2): 3, (2, 3): 3, (0, 3): 3}, ["A~_3"]),
+    (4, {(0, 1): 3, (0, 2): 3, (0, 3): 4}, ["B~_3"]),
+    (4, {(0, 1): 4, (1, 2): 3, (2, 3): 4}, ["C~_3"]),
+    (5, {(0, 1): 3, (0, 2): 3, (0, 3): 3, (0, 4): 3}, ["D~_4"]),
+    (6, {(0, 1): 3, (0, 2): 3, (0, 3): 3, (3, 4): 3, (3, 5): 3}, ["D~_5"]),
+    (7, {(0, 1): 3, (1, 2): 3, (2, 3): 3, (3, 4): 3, (2, 5): 3, (5, 6): 3}, ["E~_6"]),
+    (9, {**{(i, i + 1): 3 for i in range(7)}, (2, 8): 3}, ["E~_8"]),
+    (5, {(0, 1): 3, (1, 2): 3, (2, 3): 4, (3, 4): 3}, ["F~_4"]),
+    (3, {(0, 1): 6, (1, 2): 3}, ["G~_2"]),
+    (5, {(0, 1): 3, (2, 3): 'inf'}, ["A_1", "A_2", "A~_1"]),
+    (2, {(0, 1): Fraction(9, 4)}, ["?_2"]),
+])
+def test_diagram_type(k, labels, expected):
+    assert diagram_type(k, labels) == expected
+
+
+def test_local_diagram_types():
+    """The local diagrams of U + A_2(-1)^3: elliptic of rank 7 at the finite vertices, affine of rank 6 at the
+    cusps."""
+    from lattice.vinberg.quotient import quotient_chamber
+    res = quotient_chamber(U_lat() + A_lat(2)(-1) * 3)
+    for r in res["tracer"].representatives:
+        types = WallDiagram(res["tracer"].L, r["walls"]).type()
+        assert all("?" not in t for t in types)
+        assert all("~" in t for t in types) == r["ideal"]

@@ -36,7 +36,7 @@ Code references:
 
 **Norms of roots.** If $r$ is a root, then $|(r, r)|$ divides $2 \exp(L)$, where $\exp(L)$ is the
 exponent of the discriminant group $L^\vee / L$; in particular $|(r, r)| \leq 2 \exp(L)$.
-Indeed, let $d = \operatorname{div}(r)$ be the positive generator of $(r, L) \subset \mathbb{Z}$.
+Indeed, let $d = \mathrm{div}(r)$ be the positive generator of $(r, L) \subset \mathbb{Z}$.
 Then $(r, r)$ divides $2 (r, x)$ for all $x$, hence divides $2d$. The vector $r / d$ lies in
 $L^\vee$, and since $r$ is primitive, its class in $L^\vee / L$ has order exactly $d$, so
 $d \mid \exp(L)$.
@@ -52,10 +52,10 @@ $e_0, e_1, \ldots, e_{n-1}$ of $L$ with
 
 - $e_1, \ldots, e_{n-1}$ an LLL-reduced basis of the orthogonal complement $p^\perp \cap L$, which is
   negative definite, so that the reduction is exact (`Lattice.complement`, `Lattice.lll`);
-- $e_0$ = `axis`, a vector with $(e_0, p) = \operatorname{div}(p)$ (`Lattice.dual_vec`), shifted by the
+- $e_0$ = `axis`, a vector with $(e_0, p) = \mathrm{div}(p)$ (`Lattice.dual_vec`), shifted by the
   vector of $p^\perp \cap L$ nearest to its projection to $p^\perp$, so that it is short.
 
-This is `Vinberg.reduced_basis`. It is a basis of $L$: for $x \in L$, $(x, p) = k \operatorname{div}(p)$ for
+This is `Vinberg.reduced_basis`. It is a basis of $L$: for $x \in L$, $(x, p) = k\, \mathrm{div}(p)$ for
 some $k \in \mathbb{Z}$, and $x - k e_0 \in p^\perp$. The reduction does not change the heights of the
 roots, but it keeps the coordinates (and the bounds of §3.5) small. In all cases $(e_0, p) > 0$ is
 required (and checked, also by `VSearchCpp`): the roots of positive height must have positive
@@ -66,9 +66,9 @@ products with $p$, see §5.
 $e_1, \ldots, e_{n-1}$ span the complement of a positive vector (its sign is arbitrary, and $p$ is
 replaced by $-p$ if needed; then the given basis is kept), and the primitive vectors with
 $(p, p) > 0$ and small coordinates in an LLL-reduced basis of $L$. The candidate with the smallest
-$$\frac{(p, p)}{\operatorname{div}(p)^2} = (p^*, p^*), \qquad p^* = p / \operatorname{div}(p) \in L^\vee \text{ primitive},$$
+$$\frac{(p, p)}{\mathrm{div}(p)^2} = (p^*, p^*), \qquad p^* = p / \mathrm{div}(p) \in L^\vee \text{ primitive},$$
 is chosen (then the smallest $(p, p)$). The reason: a root $r$ at height $h$ has
-$(r, p) = h \operatorname{div}(p)$, and $\sinh d(p, r^\perp) = |(r, p)| / \sqrt{|(r, r)| (p, p)}$, so the walls
+$(r, p) = h\, \mathrm{div}(p)$, and $\sinh d(p, r^\perp) = |(r, p)| / \sqrt{|(r, r)| (p, p)}$, so the walls
 at distance at most $D$ from $p$ have heights
 $$h \leq \sqrt{2 \exp(L)} \, \sinh(D) \, \sqrt{(p^*, p^*)},$$
 and the number of heights to search grows with $(p^*, p^*)$. The distance $D$ to the farthest wall
